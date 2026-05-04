@@ -54,3 +54,7 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+    # ── Alpaca (equities market data) ────────────────────────────
+    ALPACA_API_KEY:    str = ""
+    ALPACA_API_SECRET: str = ""
