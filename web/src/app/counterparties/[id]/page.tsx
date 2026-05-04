@@ -380,7 +380,7 @@ function ResearchPanel({ counterpartyId, entityName, onApplied }: any) {
               <button
                 onClick={() => fields.forEach(([field, data]: any) => {
                   if (data?.value !== null && data?.value !== undefined) {
-                    setSelected(prev => new Set([...prev, field]))
+                    setSelected(prev => new Set(Array.from(prev).concat(field)))
                   }
                 })}
                 className="text-xs text-ink-mid hover:text-ink"
