@@ -30,6 +30,13 @@ def infer_asset_class(symbol: str) -> str:
     if len(s) <= 5 and s.isalpha(): return "crypto"
     return "crypto"
 
+# Map any non-enum asset classes to valid enum values
+ASSET_CLASS_MAP = {
+    "defi_protocol": "crypto",
+    "defi": "crypto",
+    "token": "crypto",
+}
+
 def normalize_df(df: pd.DataFrame) -> pd.DataFrame:
     df.columns = [c.lower().strip().replace(" ","_") for c in df.columns]
     for aliases, canon in [
@@ -118,10 +125,11 @@ async def upload_portfolio(
             "portfolio_id": portfolio_id,
             "asset_symbol": row["asset_symbol"],
             "asset_name": row.get("asset_name") or row["asset_symbol"],
-            "asset_class": str(row["asset_class"]).lower().strip()
-                if row.get("asset_class") and str(row.get("asset_class", "")).lower().strip()
-                    in ["crypto","equity","etf","fund","cash","fixed_income","commodity","stablecoin","defi_protocol"]
-                else infer_asset_class(row["asset_symbol"]),
+            "asset_class": (lambda ac: ASSET_CLASS_MAP.get(ac, ac))(
+                str(row["asset_class"]).lower().strip()
+            ) if row.get("asset_class") and str(row.get("asset_class","")).lower().strip()
+                in ["crypto","equity","etf","fund","cash","fixed_income","commodity","stablecoin","defi_protocol","defi","token"]
+            else infer_asset_class(row["asset_symbol"]),
             "quantity": float(row["quantity"]),
             "market_value_chf": val or None,
             "custodian_id": cp["counterparty_id"] if cp else None,
