@@ -198,3 +198,128 @@ async def override_score(
     run_in_thread(score_single_counterparty, str(counterparty_id))
 
     return {"status": "override_applied", "dimension": body.dimension, "new_value": body.new_value}
+
+
+# ── Enrichment data ───────────────────────────────────────────
+
+class EnrichmentData(BaseModel):
+    # Regulatory
+    license_active: Optional[bool] = None
+    enforcement_actions_12m: Optional[int] = None
+
+    # Financial
+    is_publicly_listed: Optional[bool] = None
+    has_audited_financials: Optional[bool] = None
+    equity_ratio: Optional[float] = None          # 0.0–1.0
+    revenue_stability: Optional[str] = None       # "stable"|"volatile"|"unknown"
+    debt_level: Optional[str] = None              # "low"|"moderate"|"high"
+
+    # Operational
+    has_soc2: Optional[bool] = None
+    has_iso27001: Optional[bool] = None
+    has_insurance: Optional[bool] = None
+    major_security_incidents: Optional[int] = None
+    years_in_operation: Optional[int] = None
+
+    # Liquidity & Reserves
+    por_ratio: Optional[float] = None             # assets/liabilities e.g. 1.05
+    reserve_quality: Optional[str] = None         # "high"|"medium"|"low"
+    withdrawal_restrictions_history: Optional[bool] = None
+
+    # On-Chain
+    onchain_reserve_trend_30d: Optional[str] = None  # "increasing"|"stable"|"declining"|"critical_outflow"
+    tvl_change_30d_pct: Optional[float] = None    # DeFi only
+    audit_count: Optional[int] = None             # DeFi only
+
+    # Reputation
+    industry_reputation_score: Optional[float] = None  # 0–100
+    leadership_concerns: Optional[bool] = None
+
+    # Notes
+    analyst_notes: Optional[str] = None
+
+
+@router.post("/{counterparty_id}/enrichment")
+async def save_enrichment(
+    counterparty_id: UUID,
+    body: EnrichmentData,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """
+    Save manually-input data signals for a counterparty.
+    Triggers immediate rescore using enriched data.
+    All fields are optional — only provided fields are updated.
+    """
+    # Get existing enrichment data and merge
+    cp = (
+        supabase.table("counterparties")
+        .select("enrichment_data, display_name")
+        .eq("counterparty_id", str(counterparty_id))
+        .single()
+        .execute()
+    )
+    if not cp.data:
+        raise HTTPException(status_code=404, detail="Counterparty not found")
+
+    existing = cp.data.get("enrichment_data") or {}
+
+    # Merge: only overwrite fields that were explicitly provided
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    merged  = {**existing, **updates}
+
+    supabase.table("counterparties").update({
+        "enrichment_data":   merged,
+        "last_enriched_at":  datetime.utcnow().isoformat(),
+        "last_enriched_by":  current_user.user_id,
+    }).eq("counterparty_id", str(counterparty_id)).execute()
+
+    # Audit log
+    supabase.table("audit_log").insert({
+        "tenant_id":      settings.DEFAULT_TENANT_ID,
+        "event_category": "DATA_WRITE",
+        "event_type":     "counterparty.enriched",
+        "actor_type":     "USER",
+        "actor_id":       current_user.user_id,
+        "resource_type":  "counterparties",
+        "resource_id":    str(counterparty_id),
+        "before_state":   existing,
+        "after_state":    merged,
+        "metadata":       {
+            "counterparty_name": cp.data["display_name"],
+            "fields_updated": list(updates.keys()),
+        },
+    }).execute()
+
+    # Trigger rescore with enriched data
+    from app.workers.scoring import score_single_counterparty
+    from app.workers.tasks import run_in_thread
+    run_in_thread(score_single_counterparty, str(counterparty_id))
+
+    return {
+        "status":          "saved",
+        "fields_updated":  list(updates.keys()),
+        "rescore_queued":  True,
+        "enrichment_data": merged,
+    }
+
+
+@router.get("/{counterparty_id}/enrichment")
+async def get_enrichment(
+    counterparty_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Get current enrichment data for a counterparty."""
+    cp = (
+        supabase.table("counterparties")
+        .select("enrichment_data, last_enriched_at, last_enriched_by")
+        .eq("counterparty_id", str(counterparty_id))
+        .single()
+        .execute()
+    )
+    if not cp.data:
+        raise HTTPException(status_code=404, detail="Counterparty not found")
+    return {
+        "enrichment_data":  cp.data.get("enrichment_data") or {},
+        "last_enriched_at": cp.data.get("last_enriched_at"),
+        "last_enriched_by": cp.data.get("last_enriched_by"),
+    }
