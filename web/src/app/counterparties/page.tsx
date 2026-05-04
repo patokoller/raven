@@ -11,16 +11,21 @@ const H = () => ({ Authorization: `Bearer ${localStorage.getItem('raven_token')}
 
 function TierPill({ tier }: { tier?: string }) {
   if (!tier) return <span className="text-ink-mid text-xs">—</span>
-  const cls: Record<string,string> = { LOW:'bg-teal/10 text-teal border-teal/20', MEDIUM:'bg-amber/10 text-amber border-amber/20', HIGH:'bg-red/10 text-red border-red/20', CRITICAL:'bg-red text-white border-red' }
-  return <span className={`text-xs font-mono px-2 py-0.5 rounded border ${cls[tier]??''}`}>{tier}</span>
+  const cls: Record<string,string> = {
+    LOW:      'bg-teal/10 text-teal border-teal/20',
+    MEDIUM:   'bg-amber/10 text-amber border-amber/20',
+    HIGH:     'bg-red/10 text-red border-red/20',
+    CRITICAL: 'bg-red text-white border-red',
+  }
+  return <span className={`text-xs font-mono px-2 py-0.5 rounded border ${cls[tier] ?? ''}`}>{tier}</span>
 }
 
 export default function CounterpartiesPage() {
-  const [cps, setCps]         = useState<any[]>([])
+  const router            = useRouter()
+  const [cps, setCps]     = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter]   = useState('')
   const [scoring, setScoring] = useState(false)
-  const router = useRouter()
 
   const load = async () => {
     setLoading(true)
@@ -40,68 +45,100 @@ export default function CounterpartiesPage() {
     } catch { toast.error('Failed') } finally { setScoring(false) }
   }
 
-  const filtered = cps.filter(c =>
-    !filter || c.display_name.toLowerCase().includes(filter.toLowerCase()) ||
-    c.entity_type.includes(filter.toLowerCase()) ||
-    (c.current_risk_tier ?? '').toLowerCase() === filter.toLowerCase()
-  ).sort((a, b) => {
-    const o = { CRITICAL:0, HIGH:1, MEDIUM:2, LOW:3 }
-    return (o[a.current_risk_tier as keyof typeof o]??4)-(o[b.current_risk_tier as keyof typeof o]??4)
-  })
+  const filtered = cps
+    .filter(c =>
+      !filter ||
+      c.display_name.toLowerCase().includes(filter.toLowerCase()) ||
+      c.entity_type.includes(filter.toLowerCase()) ||
+      (c.current_risk_tier ?? '').toLowerCase() === filter.toLowerCase()
+    )
+    .sort((a, b) => {
+      const o: Record<string,number> = { CRITICAL:0, HIGH:1, MEDIUM:2, LOW:3 }
+      return (o[a.current_risk_tier] ?? 4) - (o[b.current_risk_tier] ?? 4)
+    })
 
   return (
     <AppLayout>
-      <PageHeader title="Counterparties" subtitle={`${cps.length} monitored entities`}
+      <PageHeader
+        title="Counterparties"
+        subtitle={`${cps.length} monitored entities — click any row to view detail and input data`}
         action={
           <div className="flex gap-2">
-            <input value={filter} onChange={e => setFilter(e.target.value)}
+            <input
+              value={filter}
+              onChange={e => setFilter(e.target.value)}
               placeholder="Filter by name or tier…"
-              className="border border-border rounded px-3 py-1.5 text-xs focus:outline-none focus:border-ink w-48" />
-            <button onClick={runAll} disabled={scoring} className="btn-primary text-xs flex items-center gap-1.5 disabled:opacity-50">
-              <Activity className="w-3.5 h-3.5" />{scoring ? 'Running…' : 'Run Scoring'}
+              className="border border-border rounded px-3 py-1.5 text-xs focus:outline-none focus:border-ink w-48"
+            />
+            <button
+              onClick={runAll}
+              disabled={scoring}
+              className="btn-primary text-xs flex items-center gap-1.5 disabled:opacity-50"
+            >
+              <Activity className="w-3.5 h-3.5" />
+              {scoring ? 'Running…' : 'Run Scoring'}
             </button>
           </div>
         }
       />
+
       <div className="p-8">
         <div className="card overflow-hidden">
           <table className="w-full text-sm">
             <thead className="bg-surface-2">
-              <tr>{['Entity','Jurisdiction','Regulator','Type','Score','Tier','Last Scored'].map(h=>(
-                <th key={h} className="label text-left px-5 py-3 font-normal">{h}</th>
-              ))}</tr>
+              <tr>
+                {['Entity', 'Jurisdiction', 'Regulator', 'Type', 'Score', 'Tier', 'Last Scored'].map(h => (
+                  <th key={h} className="label text-left px-5 py-3 font-normal">{h}</th>
+                ))}
+              </tr>
             </thead>
             <tbody>
-              {loading ? Array.from({length:8}).map((_,i)=>(
-                <tr key={i} className="border-t border-border">
-                  <td colSpan={7} className="px-5 py-3"><div className="h-3 bg-surface-2 rounded animate-pulse"/></td>
-                </tr>
-              )) : filtered.map((cp:any)=>(
-                <tr key={cp.counterparty_id} className="border-t border-border hover:bg-surface-2/50 transition-colors">
-                  <td className="px-5 py-3">
-                    <div className="font-medium">{cp.display_name}</div>
-                    <div className="text-xs text-ink-mid font-mono">{cp.slug}</div>
-                  </td>
-                  <td className="px-5 py-3 text-xs text-ink-mid">{cp.jurisdiction??'—'}</td>
-                  <td className="px-5 py-3 text-xs text-ink-mid">{cp.regulator??'—'}</td>
-                  <td className="px-5 py-3 text-xs font-mono text-ink-mid">{cp.entity_type}</td>
-                  <td className="px-5 py-3">
-                    {cp.composite_score ? (
-                      <div className="flex items-center gap-2">
-                        <div className="w-20 h-1.5 bg-surface-2 rounded-full overflow-hidden">
-                          <div className="h-full rounded-full" style={{
-                            width:`${cp.composite_score}%`,
-                            background: cp.composite_score>=75?'#2A7C6F':cp.composite_score>=55?'#E67E22':'#C0392B'
-                          }}/>
-                        </div>
-                        <span className="text-xs font-mono">{cp.composite_score.toFixed(0)}</span>
-                      </div>
-                    ) : <span className="text-ink-mid text-xs">—</span>}
-                  </td>
-                  <td className="px-5 py-3"><TierPill tier={cp.current_risk_tier}/></td>
-                  <td className="px-5 py-3 text-xs text-ink-mid">{cp.scored_at?new Date(cp.scored_at).toLocaleDateString('en-CH'):'—'}</td>
-                </tr>
-              ))}
+              {loading
+                ? Array.from({ length: 8 }).map((_, i) => (
+                    <tr key={i} className="border-t border-border">
+                      <td colSpan={7} className="px-5 py-3">
+                        <div className="h-3 bg-surface-2 rounded animate-pulse" />
+                      </td>
+                    </tr>
+                  ))
+                : filtered.map((cp: any) => (
+                    <tr
+                      key={cp.counterparty_id}
+                      onClick={() => router.push(`/counterparties/${cp.counterparty_id}`)}
+                      className="border-t border-border hover:bg-amber/5 cursor-pointer transition-colors"
+                    >
+                      <td className="px-5 py-3">
+                        <div className="font-medium">{cp.display_name}</div>
+                        <div className="text-xs text-ink-mid font-mono">{cp.slug}</div>
+                      </td>
+                      <td className="px-5 py-3 text-xs text-ink-mid">{cp.jurisdiction ?? '—'}</td>
+                      <td className="px-5 py-3 text-xs text-ink-mid">{cp.regulator ?? '—'}</td>
+                      <td className="px-5 py-3 text-xs font-mono text-ink-mid">{cp.entity_type}</td>
+                      <td className="px-5 py-3">
+                        {cp.composite_score != null ? (
+                          <div className="flex items-center gap-2">
+                            <div className="w-20 h-1.5 bg-surface-2 rounded-full overflow-hidden">
+                              <div
+                                className="h-full rounded-full"
+                                style={{
+                                  width: `${cp.composite_score}%`,
+                                  background: cp.composite_score >= 75 ? '#2A7C6F'
+                                    : cp.composite_score >= 55 ? '#E67E22' : '#C0392B',
+                                }}
+                              />
+                            </div>
+                            <span className="text-xs font-mono">{cp.composite_score.toFixed(0)}</span>
+                          </div>
+                        ) : (
+                          <span className="text-ink-mid text-xs">—</span>
+                        )}
+                      </td>
+                      <td className="px-5 py-3"><TierPill tier={cp.current_risk_tier} /></td>
+                      <td className="px-5 py-3 text-xs text-ink-mid">
+                        {cp.scored_at ? new Date(cp.scored_at).toLocaleDateString('en-CH') : '—'}
+                      </td>
+                    </tr>
+                  ))}
             </tbody>
           </table>
         </div>
