@@ -29,11 +29,10 @@ async def get_weights(current_user: CurrentUser = Depends(get_current_user)):
             .select("value")
             .eq("key", "scoring_weights")
             .eq("tenant_id", settings.DEFAULT_TENANT_ID)
-            .single()
             .execute()
         )
         if row.data:
-            return {"weights": row.data["value"]}
+            return {"weights": row.data[0]["value"]}
     except Exception:
         pass
     return {"weights": settings.SCORING_WEIGHTS}
@@ -49,16 +48,19 @@ async def save_weights(
     if abs(total - 1.0) > 0.01:
         raise HTTPException(status_code=400, detail=f"Weights must sum to 1.0 (got {total:.3f})")
 
-    # Upsert into system_config
-    supabase.table("system_config").upsert({
-        "tenant_id": settings.DEFAULT_TENANT_ID,
-        "key":       "scoring_weights",
-        "value":     body.weights,
-        "updated_at": datetime.utcnow().isoformat(),
-        "updated_by": current_user.user_id,
-    }, on_conflict="tenant_id,key").execute()
+    # Upsert into system_config (best-effort — table may not exist yet)
+    try:
+        supabase.table("system_config").upsert({
+            "tenant_id": settings.DEFAULT_TENANT_ID,
+            "key":       "scoring_weights",
+            "value":     body.weights,
+            "updated_at": datetime.utcnow().isoformat(),
+            "updated_by": current_user.user_id,
+        }, on_conflict="tenant_id,key").execute()
+    except Exception as e:
+        print(f"[admin] Could not persist weights to DB: {e}")
 
-    # Update in-memory settings
+    # Update in-memory settings regardless
     settings.SCORING_WEIGHTS.update(body.weights)
 
     # Audit log
