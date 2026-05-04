@@ -1,0 +1,41 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+/* Raven design system */
+@layer base {
+  * { box-sizing: border-box; }
+  body { @apply bg-surface text-ink; }
+  
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { @apply bg-surface-2; }
+  ::-webkit-scrollbar-thumb { @apply bg-border rounded-full; }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-ink text-surface px-4 py-2 text-sm font-medium rounded hover:bg-ink-mid transition-colors;
+  }
+  .btn-secondary {
+    @apply border border-border text-ink px-4 py-2 text-sm font-medium rounded hover:bg-surface-2 transition-colors;
+  }
+  .btn-danger {
+    @apply bg-red text-white px-4 py-2 text-sm font-medium rounded hover:opacity-90 transition-opacity;
+  }
+  .card {
+    @apply bg-white border border-border rounded-lg;
+  }
+  .label {
+    @apply font-mono text-[10px] tracking-widest uppercase text-ink-mid;
+  }
+  .tier-pill-LOW      { @apply bg-teal/10 text-teal border border-teal/20 text-xs font-mono px-2 py-0.5 rounded; }
+  .tier-pill-MEDIUM   { @apply bg-amber/10 text-amber border border-amber/20 text-xs font-mono px-2 py-0.5 rounded; }
+  .tier-pill-HIGH     { @apply bg-red/10 text-red border border-red/20 text-xs font-mono px-2 py-0.5 rounded; }
+  .tier-pill-CRITICAL { @apply bg-red text-white text-xs font-mono px-2 py-0.5 rounded; }
+}
