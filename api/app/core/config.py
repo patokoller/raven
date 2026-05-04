@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     SUPABASE_URL: str = ""
     SUPABASE_ANON_KEY: str = ""
     SUPABASE_SERVICE_ROLE_KEY: str = ""
-    DATABASE_URL: str = ""   # optional — not used directly in MVP
+    DATABASE_URL: str = ""
 
     # Anthropic
     ANTHROPIC_API_KEY: str = ""
@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     # Market data
     COINGECKO_API_KEY: str = ""
     NEWS_API_KEY: str = ""
+
+    # Alpaca (equities market data)
+    ALPACA_API_KEY: str = ""
+    ALPACA_API_SECRET: str = ""
 
     # Storage
     STORAGE_BUCKET: str = "raven-reports"
@@ -39,7 +43,7 @@ class Settings(BaseSettings):
     # Tenant
     DEFAULT_TENANT_ID: str = "aaaaaaaa-0000-0000-0000-000000000001"
 
-    # Scoring weights
+    # Scoring weights (overridden by system_config table at runtime)
     SCORING_WEIGHTS: dict = {
         "regulatory":  0.25,
         "financial":   0.20,
@@ -54,7 +58,3 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-
-    # ── Alpaca (equities market data) ────────────────────────────
-    ALPACA_API_KEY:    str = ""
-    ALPACA_API_SECRET: str = ""
