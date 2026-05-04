@@ -20,7 +20,10 @@ from typing import Optional, Dict, List
 from app.core.config import settings
 
 
+# Market data endpoint — works with both paper and live API keys
 ALPACA_DATA_URL = "https://data.alpaca.markets/v2"
+# Paper trading base URL (for order/account endpoints later)
+ALPACA_PAPER_URL = "https://paper-api.alpaca.markets/v2"
 
 
 def _alpaca_headers() -> dict:
