@@ -1,65 +1,33 @@
-# Raven API — Python Dependencies
-# Install: pip install -r requirements.txt
-# Python: 3.11+
+# Raven API — Python 3.11+
 
-# ── Web Framework ────────────────────────────────────────────
+# Web framework
 fastapi==0.115.0
 uvicorn[standard]==0.30.6
-python-multipart==0.0.9      # file uploads
+python-multipart==0.0.9
 
-# ── Configuration & Validation ───────────────────────────────
+# Config & validation
 pydantic==2.8.2
 pydantic-settings==2.4.0
 
-# ── Database & Supabase ──────────────────────────────────────
+# Database
 supabase==2.7.4
-asyncpg==0.29.0              # direct postgres for heavy analytics
-sqlalchemy==2.0.35           # for Alembic migrations
-alembic==1.13.3
 
-# ── Auth ─────────────────────────────────────────────────────
+# Auth
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
-pyotp==2.9.0                 # TOTP for MFA
 
-# ── AI / Agents ──────────────────────────────────────────────
+# AI
 anthropic==0.34.2
-langgraph==0.2.28
-langsmith==0.1.120           # tracing & evaluation
 
-# ── Task Queue ───────────────────────────────────────────────
-celery==5.4.0
-redis==5.0.8
-flower==2.0.1                # Celery monitoring UI
-
-# ── Data Processing ──────────────────────────────────────────
+# Data
 pandas==2.2.3
 numpy==2.1.1
-openpyxl==3.1.5              # Excel file parsing
-python-dateutil==2.9.0
+openpyxl==3.1.5
+scipy==1.14.1
 
-# ── Market Data ──────────────────────────────────────────────
-httpx==0.27.2                # async HTTP
-aiohttp==3.10.5
+# HTTP
+httpx==0.27.2
 
-# ── Financial Analytics ──────────────────────────────────────
-scipy==1.14.1                # VaR, CVaR, statistical functions
-statsmodels==0.14.3
-
-# ── PDF Generation ───────────────────────────────────────────
-weasyprint==62.3             # HTML → PDF
-jinja2==3.1.4                # templating for PDF
-
-# ── Utilities ────────────────────────────────────────────────
+# Utils
 python-dotenv==1.0.1
-structlog==24.4.0            # structured logging
-sentry-sdk[fastapi]==2.14.0  # error monitoring
-tenacity==9.0.0              # retry logic
 python-slugify==8.0.4
-
-# ── Dev & Testing ────────────────────────────────────────────
-pytest==8.3.3
-pytest-asyncio==0.24.0
-httpx==0.27.2                # test client
-factory-boy==3.3.1
-faker==30.3.0

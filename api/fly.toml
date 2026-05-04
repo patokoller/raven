@@ -1,5 +1,5 @@
 app = "raven-api"
-primary_region = "fra"  # Frankfurt — closest to Switzerland
+primary_region = "fra"
 
 [build]
 
@@ -16,14 +16,9 @@ primary_region = "fra"  # Frankfurt — closest to Switzerland
 
   [http_service.concurrency]
     type = "connections"
-    hard_limit = 100
-    soft_limit = 80
+    hard_limit = 25
+    soft_limit = 20
 
 [[vm]]
   size = "shared-cpu-1x"
   memory = "512mb"
-
-[processes]
-  api = "uvicorn main:app --host 0.0.0.0 --port 8080 --workers 2"
-  worker = "celery -A app.workers.celery_app worker --loglevel=info --concurrency=2"
-  beat = "celery -A app.workers.celery_app beat --loglevel=info"
