@@ -3,6 +3,9 @@ import { useEffect, useState, useRef } from 'react'
 import { useParams } from 'next/navigation'
 import AppLayout from '@/components/layout/AppLayout'
 import PageHeader from '@/components/layout/PageHeader'
+import dynamic from 'next/dynamic'
+
+const DownloadButton = dynamic(() => import('@/components/pdf/DownloadButton'), { ssr: false })
 import { CheckCircle, Clock, Edit3, AlertTriangle, TrendingDown } from 'lucide-react'
 import toast from 'react-hot-toast'
 
@@ -402,21 +405,24 @@ export default function ReportDetailPage() {
         title={report.title}
         subtitle={`${report.report_ref} · ${report.report_period} · ${report.status}`}
         action={
-          isDraft ? (
-            <div className="flex items-center gap-2 text-xs text-ink-mid">
-              <Clock className="w-3.5 h-3.5 animate-spin" /> Generating — auto-refreshing every 20s
-            </div>
-          ) : isReview ? (
-            <button onClick={approve} disabled={approving}
-              className="btn-primary text-xs flex items-center gap-1.5 disabled:opacity-50">
-              <CheckCircle className="w-3.5 h-3.5" />
-              {approving ? 'Approving…' : 'Approve Report'}
-            </button>
-          ) : (
-            <span className={`text-xs font-mono flex items-center gap-1.5 ${isApproved ? 'text-teal' : 'text-ink-mid'}`}>
-              <CheckCircle className="w-3.5 h-3.5" /> {report.status}
-            </span>
-          )
+          <div className="flex items-center gap-2">
+            {!isDraft && <DownloadButton report={report} clientName="" />}
+            {isDraft ? (
+              <div className="flex items-center gap-2 text-xs text-ink-mid">
+                <Clock className="w-3.5 h-3.5 animate-spin" /> Generating…
+              </div>
+            ) : isReview ? (
+              <button onClick={approve} disabled={approving}
+                className="btn-primary text-xs flex items-center gap-1.5 disabled:opacity-50">
+                <CheckCircle className="w-3.5 h-3.5" />
+                {approving ? 'Approving…' : 'Approve Report'}
+              </button>
+            ) : (
+              <span className={`text-xs font-mono flex items-center gap-1.5 ${isApproved ? 'text-teal' : 'text-ink-mid'}`}>
+                <CheckCircle className="w-3.5 h-3.5" /> {report.status}
+              </span>
+            )}
+          </div>
         }
       />
 
