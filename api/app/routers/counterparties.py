@@ -323,3 +323,137 @@ async def get_enrichment(
         "last_enriched_at": cp.data.get("last_enriched_at"),
         "last_enriched_by": cp.data.get("last_enriched_by"),
     }
+
+
+# ── Research Agent endpoints ──────────────────────────────────
+
+@router.post("/{counterparty_id}/research")
+async def trigger_research(
+    counterparty_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """
+    Trigger the AI research agent for a counterparty.
+    Runs in background (~2-3 min). Poll GET /research to check status.
+    """
+    cp = (
+        supabase.table("counterparties")
+        .select("display_name, research_status")
+        .eq("counterparty_id", str(counterparty_id))
+        .single()
+        .execute()
+    )
+    if not cp.data:
+        raise HTTPException(status_code=404, detail="Counterparty not found")
+
+    if cp.data.get("research_status") == "running":
+        raise HTTPException(status_code=409, detail="Research already running for this counterparty")
+
+    from app.agents.research_agent import run_research_agent
+    from app.workers.tasks import run_in_thread
+    run_in_thread(run_research_agent, str(counterparty_id))
+
+    supabase.table("audit_log").insert({
+        "tenant_id":      settings.DEFAULT_TENANT_ID,
+        "event_category": "AGENT",
+        "event_type":     "counterparty.research_started",
+        "actor_type":     "USER",
+        "actor_id":       current_user.user_id,
+        "resource_type":  "counterparties",
+        "resource_id":    str(counterparty_id),
+        "metadata":       {"entity_name": cp.data["display_name"]},
+    }).execute()
+
+    return {
+        "status":  "started",
+        "message": f"Researching {cp.data['display_name']} — takes 2-3 minutes. Poll GET /research for results.",
+    }
+
+
+@router.get("/{counterparty_id}/research")
+async def get_research(
+    counterparty_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Get the latest research report for a counterparty."""
+    cp = (
+        supabase.table("counterparties")
+        .select("research_data, research_status, last_researched_at, display_name")
+        .eq("counterparty_id", str(counterparty_id))
+        .single()
+        .execute()
+    )
+    if not cp.data:
+        raise HTTPException(status_code=404, detail="Counterparty not found")
+
+    return {
+        "counterparty_id":   str(counterparty_id),
+        "entity_name":       cp.data["display_name"],
+        "research_status":   cp.data.get("research_status", "none"),
+        "last_researched_at": cp.data.get("last_researched_at"),
+        "research_data":     cp.data.get("research_data"),
+    }
+
+
+@router.post("/{counterparty_id}/research/apply")
+async def apply_research(
+    counterparty_id: UUID,
+    body: dict,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """
+    Apply selected research findings to enrichment data.
+    body: { "fields": ["license_active", "has_soc2", ...] } or { "apply_all": true }
+    Triggers rescore after apply.
+    """
+    cp = (
+        supabase.table("counterparties")
+        .select("research_data, enrichment_data, display_name")
+        .eq("counterparty_id", str(counterparty_id))
+        .single()
+        .execute()
+    )
+    if not cp.data or not cp.data.get("research_data"):
+        raise HTTPException(status_code=404, detail="No research data found. Run research first.")
+
+    from app.agents.research_agent import extract_enrichment_from_research
+    all_enrichment = extract_enrichment_from_research(cp.data["research_data"])
+
+    apply_all     = body.get("apply_all", False)
+    selected      = body.get("fields", [])
+    fields_to_apply = list(all_enrichment.keys()) if apply_all else selected
+
+    existing  = cp.data.get("enrichment_data") or {}
+    updates   = {k: v for k, v in all_enrichment.items() if k in fields_to_apply}
+    merged    = {**existing, **updates}
+
+    supabase.table("counterparties").update({
+        "enrichment_data":  merged,
+        "last_enriched_at": datetime.utcnow().isoformat(),
+        "last_enriched_by": current_user.user_id,
+    }).eq("counterparty_id", str(counterparty_id)).execute()
+
+    supabase.table("audit_log").insert({
+        "tenant_id":      settings.DEFAULT_TENANT_ID,
+        "event_category": "HUMAN_REVIEW",
+        "event_type":     "counterparty.research_applied",
+        "actor_type":     "USER",
+        "actor_id":       current_user.user_id,
+        "resource_type":  "counterparties",
+        "resource_id":    str(counterparty_id),
+        "metadata": {
+            "entity_name":    cp.data["display_name"],
+            "fields_applied": fields_to_apply,
+            "apply_all":      apply_all,
+        },
+    }).execute()
+
+    from app.workers.scoring import score_single_counterparty
+    from app.workers.tasks import run_in_thread
+    run_in_thread(score_single_counterparty, str(counterparty_id))
+
+    return {
+        "status":         "applied",
+        "fields_applied": fields_to_apply,
+        "rescore_queued": True,
+    }
