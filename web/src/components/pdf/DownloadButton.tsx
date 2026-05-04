@@ -20,7 +20,8 @@ export default function DownloadButton({ report, clientName }: DownloadButtonPro
       const React = await import('react')
 
       const blob = await pdf(
-        React.createElement(ReportPDF, { report, clientName })
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        React.createElement(ReportPDF, { report, clientName }) as any
       ).toBlob()
 
       const url  = URL.createObjectURL(blob)
