@@ -118,7 +118,10 @@ async def upload_portfolio(
             "portfolio_id": portfolio_id,
             "asset_symbol": row["asset_symbol"],
             "asset_name": row.get("asset_name") or row["asset_symbol"],
-            "asset_class": infer_asset_class(row["asset_symbol"]),
+            "asset_class": str(row["asset_class"]).lower().strip()
+                if row.get("asset_class") and str(row.get("asset_class", "")).lower().strip()
+                    in ["crypto","equity","etf","fund","cash","fixed_income","commodity","stablecoin","defi_protocol"]
+                else infer_asset_class(row["asset_symbol"]),
             "quantity": float(row["quantity"]),
             "market_value_chf": val or None,
             "custodian_id": cp["counterparty_id"] if cp else None,
