@@ -44,3 +44,14 @@ app.include_router(stress_tests.router,   prefix="/api/v1/stress",         tags=
 @app.get("/health", tags=["Health"])
 async def health():
     return {"status": "ok", "service": "raven-api", "version": "0.1.0"}
+
+
+# Clients endpoint (lightweight — used by portfolio upload UI)
+from fastapi import Depends as _Depends
+from app.core.auth import get_current_user as _gcu
+
+@app.get("/api/v1/clients", tags=["Clients"])
+async def list_clients(current_user=_Depends(_gcu)):
+    from app.core.database import supabase as _sb
+    from app.core.config import settings as _s
+    return _sb.table("clients").select("client_id,client_ref,display_name,aum_chf").eq("tenant_id", _s.DEFAULT_TENANT_ID).execute().data

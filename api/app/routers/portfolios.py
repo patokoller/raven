@@ -172,3 +172,8 @@ async def get_positions(portfolio_id: str, current_user: CurrentUser = Depends(g
         .select("*").eq("portfolio_id", portfolio_id)
         .order("market_value_chf", desc=True).execute().data
     )
+
+
+@router.get("/clients-list")
+async def list_clients(current_user: CurrentUser = Depends(get_current_user)):
+    return supabase.table("clients").select("client_id,client_ref,display_name").eq("tenant_id", settings.DEFAULT_TENANT_ID).eq("is_active", True).execute().data
