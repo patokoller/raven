@@ -492,7 +492,8 @@ export default function CounterpartyDetailPage() {
     return n === 0 ? 'empty' : n === fields.length ? 'complete' : 'partial'
   }
 
-  const tierColor = { LOW:'#2A7C6F', MEDIUM:'#E67E22', HIGH:'#C0392B', CRITICAL:'#7B1010' }[cp?.current_risk_tier] || '#6B6560'
+  const tierColors: Record<string,string> = { LOW:'#2A7C6F', MEDIUM:'#E67E22', HIGH:'#C0392B', CRITICAL:'#7B1010' }
+  const tierColor = tierColors[cp?.current_risk_tier as string] || '#6B6560'
 
   if (loading) return <AppLayout><div className="p-8 text-sm text-ink-mid">Loading…</div></AppLayout>
   if (!cp)     return <AppLayout><div className="p-8 text-sm text-red">Not found</div></AppLayout>
