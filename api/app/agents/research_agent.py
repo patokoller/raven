@@ -183,6 +183,20 @@ def _research_counterparty(cp: dict) -> dict:
             api_data["zefix"] = zefix_result
             api_sources.append("Zefix (Swiss Commercial Register)")
 
+        # FINMA supervised institutions
+        from app.services.providers import finma as finma_provider
+        finma_result = finma_provider.enrich_counterparty(cp.get("slug",""), name)
+        if finma_result.get("available"):
+            api_data["finma"] = finma_result
+            api_sources.append("FINMA Register")
+
+    # GLEIF LEI Register (global — all jurisdictions)
+    from app.services.providers import uid_gleif
+    gleif_result = uid_gleif.enrich_gleif(cp.get("slug",""), name)
+    if gleif_result.get("available"):
+        api_data["gleif"] = gleif_result
+        api_sources.append("GLEIF LEI Register")
+
     # Build API context string for the prompt
     api_context = ""
     if api_data:

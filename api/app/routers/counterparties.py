@@ -468,7 +468,7 @@ async def get_data_sources(
     Fetch live data from all providers for a counterparty and return
     what each source contributes. Used for the data sources panel.
     """
-    from app.services.providers import defillama, edgar, fca as fca_provider, zefix as zefix_provider
+    from app.services.providers import defillama, edgar, fca as fca_provider, zefix as zefix_provider, finma as finma_provider, uid_gleif
 
     cp = (
         supabase.table("counterparties")
@@ -524,6 +524,27 @@ async def get_data_sources(
                      if k not in ("source","available","fetched_at") and v is not None} if zefix_result.get("available") else {},
             "url": zefix_result.get("registry_url", "https://www.zefix.admin.ch"),
         }
+
+    # FINMA
+    if cp.get("jurisdiction") == "CH" or "FINMA" in (cp.get("regulator","").upper()):
+        finma_result = finma_provider.enrich_counterparty(cp.get("slug",""), cp.get("display_name",""))
+        sources["finma"] = {
+            "name": "FINMA Supervised Institutions",
+            "available": finma_result.get("available", False),
+            "data": {k: v for k, v in finma_result.items()
+                     if k not in ("source","available","fetched_at") and v is not None} if finma_result.get("available") else {},
+            "url": finma_result.get("finma_url", "https://www.finma.ch/en/authorisation/supervised-institutions/"),
+        }
+
+    # GLEIF LEI
+    gleif_result = uid_gleif.enrich_gleif(cp.get("slug",""), cp.get("display_name",""))
+    sources["gleif"] = {
+        "name": "GLEIF LEI Register",
+        "available": gleif_result.get("available", False),
+        "data": {k: v for k, v in gleif_result.items()
+                 if k not in ("source","available","fetched_at") and v is not None} if gleif_result.get("available") else {},
+        "url": gleif_result.get("gleif_url", "https://search.gleif.org"),
+    }
 
     # CoinGecko
     if cp.get("entity_type") == "exchange":

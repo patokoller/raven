@@ -16,7 +16,7 @@ import httpx
 from datetime import datetime
 from typing import Optional
 from app.core.config import settings
-from app.services.providers import defillama, edgar, fca, zefix
+from app.services.providers import defillama, edgar, fca, zefix, finma, uid_gleif
 
 
 def fetch_coingecko_exchange(slug: str) -> dict:
@@ -167,6 +167,55 @@ def build_counterparty_data(cp: dict) -> dict:
                     "publication_count":  zefix_data.get("publication_count_12m"),
                     "registry_url":       zefix_data.get("registry_url"),
                 }
+
+    # ── 3c. FINMA (Swiss regulator — exact licence type) ──────
+    if cp.get("jurisdiction") == "CH" or cp.get("regulator","").upper().startswith("FINMA"):
+        if settings.ZEFIX_USERNAME:  # same auth context, FINMA is public
+            finma_data = finma.enrich_counterparty(slug, display_name)
+            if finma_data.get("available"):
+                data["_sources"].append("finma")
+                # FINMA licence status overrides everything for CH entities
+                if finma_data.get("license_active") is not None:
+                    data["license_active"] = finma_data["license_active"]
+                if finma_data.get("enforcement_actions_12m") is not None:
+                    data.setdefault("enforcement_actions_12m", finma_data["enforcement_actions_12m"])
+                data["_finma"] = {
+                    "licence_type":  finma_data.get("finma_licence_type"),
+                    "status":        finma_data.get("finma_status"),
+                    "granted":       finma_data.get("licence_granted_date"),
+                    "years_reg":     finma_data.get("years_regulated"),
+                    "url":           finma_data.get("finma_url"),
+                    "conditions":    finma_data.get("has_finma_conditions"),
+                }
+
+    # ── 3d. UID Register (Swiss VAT / commercial status) ──────
+    if cp.get("jurisdiction") == "CH":
+        uid_data = uid_gleif.enrich_uid(slug, display_name)
+        if uid_data.get("available"):
+            data["_sources"].append("uid_register")
+            data["_uid"] = {
+                "uid":        uid_data.get("uid_number"),
+                "vat":        uid_data.get("vat_registered"),
+                "active":     uid_data.get("is_commercially_active"),
+                "noga":       uid_data.get("noga_code"),
+                "type":       uid_data.get("business_type"),
+            }
+
+    # ── 3e. GLEIF LEI Register (global, all jurisdictions) ────
+    gleif_data = uid_gleif.enrich_gleif(slug, display_name)
+    if gleif_data.get("available"):
+        data["_sources"].append("gleif")
+        # GLEIF as supplementary licence active signal
+        if data.get("license_active") is None and gleif_data.get("license_active_gleif") is not None:
+            data["license_active"] = gleif_data["license_active_gleif"]
+        data["_gleif"] = {
+            "lei":        gleif_data.get("lei"),
+            "status":     gleif_data.get("lei_status"),
+            "valid":      gleif_data.get("lei_registration_valid"),
+            "country":    gleif_data.get("gleif_country"),
+            "updated":    gleif_data.get("gleif_last_updated"),
+            "url":        gleif_data.get("gleif_url"),
+        }
 
     # ── 4. CoinGecko ──────────────────────────────────────────
     if entity_type == "exchange":
