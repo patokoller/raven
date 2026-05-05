@@ -4,7 +4,7 @@ import { useParams } from 'next/navigation'
 import AppLayout from '@/components/layout/AppLayout'
 import PageHeader from '@/components/layout/PageHeader'
 import {
-  Save, RefreshCw, ChevronDown, ChevronUp, Globe,
+  Save, RefreshCw, ChevronDown, ChevronUp,
   AlertTriangle, Sparkles, CheckCircle, XCircle,
   Clock, Database, Globe, Search
 } from 'lucide-react'
