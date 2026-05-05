@@ -1,7 +1,7 @@
 'use client'
 import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
-import { Shield, LayoutDashboard, Building2, FolderOpen, FileText, Bell, LogOut, ChevronRight, Settings } from 'lucide-react'
+import { Shield, LayoutDashboard, Building2, FolderOpen, FileText, Bell, LogOut, ChevronRight, Settings, Scale } from 'lucide-react'
 import { createClient } from '@/lib/supabase'
 import Link from 'next/link'
 
@@ -12,6 +12,7 @@ const NAV = [
   { href: '/reports',        label: 'Reports',        icon: FileText },
   { href: '/alerts',         label: 'Alerts',         icon: Bell },
   { href: '/admin',          label: 'Calibration',    icon: Settings },
+  { href: '/regulations',    label: 'Regulations',    icon: Scale },
 ]
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
