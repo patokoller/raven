@@ -11,6 +11,17 @@ from app.routers import auth, counterparties, portfolios, reports, alerts, agent
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print(f"🦅 Raven API starting — {settings.ENVIRONMENT}")
+    import threading, time
+    def _daily_monitor():
+        time.sleep(300)
+        while True:
+            try:
+                from app.services.regulatory_monitor import run_monitor
+                run_monitor()
+            except Exception as e:
+                print(f"[regulatory] Daily monitor error: {e}")
+            time.sleep(86400)
+    threading.Thread(target=_daily_monitor, daemon=True).start()
     yield
     print("Raven API shut down.")
 

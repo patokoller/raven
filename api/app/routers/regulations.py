@@ -24,40 +24,47 @@ async def list_documents(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """List all regulatory documents, newest first."""
-    q = (
-        supabase.table("regulatory_documents")
-        .select("doc_id, source, regulator, doc_type, doc_ref, title, url, "
-                "published_date, status, criticality, affected_entity_types, "
-                "affected_counterparties, summary, created_at, applied_at")
-        .eq("tenant_id", settings.DEFAULT_TENANT_ID)
-        .order("created_at", desc=True)
-    )
-    if status:
-        q = q.eq("status", status)
-    if criticality:
-        q = q.eq("criticality", criticality)
-
-    return q.limit(50).execute().data
+    try:
+        q = (
+            supabase.table("regulatory_documents")
+            .select("doc_id, source, regulator, doc_type, doc_ref, title, url, "
+                    "published_date, status, criticality, affected_entity_types, "
+                    "affected_counterparties, summary, created_at, applied_at")
+            .eq("tenant_id", settings.DEFAULT_TENANT_ID)
+            .order("created_at", desc=True)
+        )
+        if status:
+            q = q.eq("status", status)
+        if criticality:
+            q = q.eq("criticality", criticality)
+        return q.limit(50).execute().data or []
+    except Exception as e:
+        print(f"[regulations] list error: {e}")
+        return []
 
 
 @router.get("/stats")
 async def get_stats(current_user: CurrentUser = Depends(get_current_user)):
     """Summary stats for the regulatory intelligence panel."""
-    docs = (
-        supabase.table("regulatory_documents")
-        .select("status, criticality")
-        .eq("tenant_id", settings.DEFAULT_TENANT_ID)
-        .execute()
-        .data
-    )
-    return {
-        "total":    len(docs),
-        "new":      sum(1 for d in docs if d["status"] == "new"),
-        "analysed": sum(1 for d in docs if d["status"] in ("analysed", "reviewed")),
-        "applied":  sum(1 for d in docs if d["status"] == "applied"),
-        "critical": sum(1 for d in docs if d["criticality"] == "CRITICAL"),
-        "high":     sum(1 for d in docs if d["criticality"] == "HIGH"),
-    }
+    try:
+        docs = (
+            supabase.table("regulatory_documents")
+            .select("status, criticality")
+            .eq("tenant_id", settings.DEFAULT_TENANT_ID)
+            .execute()
+            .data
+        ) or []
+        return {
+            "total":    len(docs),
+            "new":      sum(1 for d in docs if d["status"] == "new"),
+            "analysed": sum(1 for d in docs if d["status"] in ("analysed", "reviewed")),
+            "applied":  sum(1 for d in docs if d["status"] == "applied"),
+            "critical": sum(1 for d in docs if d["criticality"] == "CRITICAL"),
+            "high":     sum(1 for d in docs if d["criticality"] == "HIGH"),
+        }
+    except Exception as e:
+        print(f"[regulations] stats error: {e}")
+        return {"total": 0, "new": 0, "analysed": 0, "applied": 0, "critical": 0, "high": 0}
 
 
 @router.get("/{doc_id}")
