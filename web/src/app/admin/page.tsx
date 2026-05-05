@@ -284,6 +284,8 @@ export default function AdminPage() {
         const w = await wRes.json()
         setWeights(w.weights)
         setSaved(w.weights)
+        if (w.source) setWeightSource(w.source)
+        if (w.updated_at) setWeightUpdatedAt(w.updated_at)
       }
     } catch {} finally { setLoading(false) }
   }

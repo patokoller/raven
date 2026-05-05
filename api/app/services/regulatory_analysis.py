@@ -332,13 +332,16 @@ def apply_weight_recommendations(doc_id: str, entity_type_filter: Optional[str] 
         first_key = list(current.keys())[0]
         current[first_key] = round(current[first_key] + adj, 3)
 
-    # Save
+    # Save to DB
     supabase.table("system_config").upsert({
         "tenant_id": settings.DEFAULT_TENANT_ID,
         "key":       "scoring_weights",
         "value":     current,
         "updated_at": datetime.utcnow().isoformat(),
     }, on_conflict="tenant_id,key").execute()
+
+    # Also update in-memory settings so scoring engine uses new weights immediately
+    settings.SCORING_WEIGHTS.update(current)
 
     # Mark document as applied
     supabase.table("regulatory_documents").update({

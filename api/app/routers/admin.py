@@ -21,21 +21,40 @@ class WeightsUpdate(BaseModel):
 
 @router.get("/weights")
 async def get_weights(current_user: CurrentUser = Depends(get_current_user)):
-    """Get current scoring weights."""
-    # Try to load from DB config table, fall back to settings
+    """Get current scoring weights including last update metadata."""
     try:
         row = (
             supabase.table("system_config")
-            .select("value")
+            .select("value, updated_at, updated_by")
             .eq("key", "scoring_weights")
             .eq("tenant_id", settings.DEFAULT_TENANT_ID)
             .execute()
         )
         if row.data:
-            return {"weights": row.data[0]["value"]}
+            r = row.data[0]
+            # Check if last update came from regulatory intelligence
+            source = "manual"
+            if r.get("updated_at"):
+                reg = (
+                    supabase.table("regulatory_documents")
+                    .select("doc_ref, title, applied_at")
+                    .eq("tenant_id", settings.DEFAULT_TENANT_ID)
+                    .eq("status", "applied")
+                    .order("applied_at", desc=True)
+                    .limit(1)
+                    .execute()
+                    .data
+                )
+                if reg and reg[0].get("applied_at"):
+                    source = f"regulatory: {reg[0].get('doc_ref', reg[0].get('title',''))[:50]}"
+            return {
+                "weights":    r["value"],
+                "updated_at": r.get("updated_at"),
+                "source":     source,
+            }
     except Exception:
         pass
-    return {"weights": settings.SCORING_WEIGHTS}
+    return {"weights": settings.SCORING_WEIGHTS, "updated_at": None, "source": "default"}
 
 
 @router.post("/weights")
