@@ -155,6 +155,10 @@ async def batch_research(
         if cp.get("research_status") not in ("complete", "running")
     ]
 
+    # If everything is done or errored, allow full retry of errors
+    if not to_research:
+        to_research = [cp for cp in cps if cp.get("research_status") == "error"]
+
     from app.agents.research_agent import run_research_agent
     from app.workers.tasks import run_in_thread
 

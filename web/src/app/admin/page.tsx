@@ -127,11 +127,13 @@ function ResearchPanel() {
               {applying ? 'Applying…' : rescoring ? 'Rescoring…' : `Apply All & Rescore (${status.complete})`}
             </button>
           )}
-          <button onClick={startBatch} disabled={running || status?.not_started === 0}
+          <button onClick={startBatch} disabled={running || (status?.not_started === 0 && status?.error === 0)}
             className="btn-primary text-xs flex items-center gap-1.5 py-1.5 disabled:opacity-50">
             {running
               ? <><RefreshCw className="w-3 h-3 animate-spin" /> Researching…</>
-              : <><Sparkles className="w-3 h-3" /> Research All Counterparties</>
+              : status?.error > 0 && status?.not_started === 0
+                ? <><Sparkles className="w-3 h-3" /> Retry {status.error} Failed</>
+                : <><Sparkles className="w-3 h-3" /> Research All Counterparties</>
             }
           </button>
         </div>
