@@ -260,46 +260,76 @@ def _count_found_fields(result: dict) -> int:
 def extract_enrichment_from_research(research_data: dict) -> dict:
     """
     Convert research findings to enrichment data format.
-    Only includes fields where the agent found data (non-null values).
-    Used for one-click apply.
+    Resilient to Haiku output variations — handles both nested and flat structures.
+    Only includes non-null values with at least low confidence.
     """
     enrichment = {}
     findings   = research_data.get("findings", {})
 
     field_map = {
-        # regulatory
-        "regulatory.license_active":            "license_active",
-        "regulatory.enforcement_actions_12m":   "enforcement_actions_12m",
-        # financial
-        "financial.is_publicly_listed":         "is_publicly_listed",
-        "financial.has_audited_financials":     "has_audited_financials",
-        "financial.equity_ratio":               "equity_ratio",
-        "financial.revenue_stability":          "revenue_stability",
-        "financial.debt_level":                 "debt_level",
-        # operational
-        "operational.has_soc2":                 "has_soc2",
-        "operational.has_iso27001":             "has_iso27001",
-        "operational.has_insurance":            "has_insurance",
-        "operational.major_security_incidents": "major_security_incidents",
-        "operational.years_in_operation":       "years_in_operation",
-        # liquidity
-        "liquidity.por_ratio":                  "por_ratio",
-        "liquidity.reserve_quality":            "reserve_quality",
-        "liquidity.withdrawal_restrictions_history": "withdrawal_restrictions_history",
-        # onchain
-        "onchain.onchain_reserve_trend_30d":    "onchain_reserve_trend_30d",
-        "onchain.tvl_change_30d_pct":           "tvl_change_30d_pct",
-        "onchain.audit_count":                  "audit_count",
-        # reputation
-        "reputation.industry_reputation_score": "industry_reputation_score",
-        "reputation.leadership_concerns":       "leadership_concerns",
+        "regulatory.license_active":                    "license_active",
+        "regulatory.enforcement_actions_12m":           "enforcement_actions_12m",
+        "financial.is_publicly_listed":                 "is_publicly_listed",
+        "financial.has_audited_financials":             "has_audited_financials",
+        "financial.equity_ratio":                       "equity_ratio",
+        "financial.revenue_stability":                  "revenue_stability",
+        "financial.debt_level":                         "debt_level",
+        "operational.has_soc2":                         "has_soc2",
+        "operational.has_iso27001":                     "has_iso27001",
+        "operational.has_insurance":                    "has_insurance",
+        "operational.major_security_incidents":         "major_security_incidents",
+        "operational.years_in_operation":               "years_in_operation",
+        "liquidity.por_ratio":                          "por_ratio",
+        "liquidity.reserve_quality":                    "reserve_quality",
+        "liquidity.withdrawal_restrictions_history":    "withdrawal_restrictions_history",
+        "onchain.onchain_reserve_trend_30d":            "onchain_reserve_trend_30d",
+        "onchain.tvl_change_30d_pct":                  "tvl_change_30d_pct",
+        "onchain.audit_count":                          "audit_count",
+        "reputation.industry_reputation_score":         "industry_reputation_score",
+        "reputation.leadership_concerns":               "leadership_concerns",
     }
+
+    SKIP_CONFIDENCE = {"none"}  # skip fields with no confidence
 
     for path, enrich_key in field_map.items():
         dim, field = path.split(".", 1)
-        field_data = findings.get(dim, {}).get(field, {})
+        dim_data   = findings.get(dim, {})
+        if not isinstance(dim_data, dict):
+            continue
+        field_data = dim_data.get(field, {})
+        if not isinstance(field_data, dict):
+            # Haiku sometimes returns the value directly, not nested
+            if field_data is not None:
+                enrichment[enrich_key] = field_data
+            continue
+
+        confidence = field_data.get("confidence", "none")
+        if confidence in SKIP_CONFIDENCE:
+            continue
+
         value = field_data.get("value")
-        if value is not None:
-            enrichment[enrich_key] = value
+        if value is None:
+            continue
+
+        # Type coercion — ensure values match expected types
+        try:
+            if enrich_key in ("license_active", "has_audited_financials", "has_soc2",
+                              "has_iso27001", "has_insurance", "is_publicly_listed",
+                              "withdrawal_restrictions_history", "leadership_concerns"):
+                if isinstance(value, str):
+                    value = value.lower() in ("true", "yes", "1")
+            elif enrich_key in ("enforcement_actions_12m", "major_security_incidents",
+                                "years_in_operation", "audit_count"):
+                value = int(float(value))
+            elif enrich_key in ("equity_ratio", "por_ratio", "tvl_change_30d_pct",
+                                "industry_reputation_score"):
+                value = float(value)
+            elif enrich_key in ("revenue_stability", "debt_level", "reserve_quality",
+                                "onchain_reserve_trend_30d"):
+                value = str(value).lower().strip()
+        except (ValueError, TypeError):
+            continue  # skip malformed values
+
+        enrichment[enrich_key] = value
 
     return enrichment

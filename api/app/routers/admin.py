@@ -242,11 +242,11 @@ async def batch_apply_research(
 ):
     """
     Apply ALL research findings to enrichment data for ALL counterparties
-    that have completed research. Triggers full rescore of all applied.
-    One-click: research → apply → rescore across the entire registry.
+    that have completed research. Scores sequentially (not parallel) to
+    avoid overwhelming Supabase connections.
     """
     from app.agents.research_agent import extract_enrichment_from_research
-    from app.workers.scoring import score_single_counterparty
+    from app.workers.scoring import score_all_counterparties
     from app.workers.tasks import run_in_thread
 
     cps = (
@@ -258,14 +258,20 @@ async def batch_apply_research(
         .data
     )
 
-    applied = []
+    applied  = []
+    skipped  = []
+    errors   = []
+
     for cp in cps:
         if not cp.get("research_data"):
+            skipped.append(cp["display_name"])
             continue
         try:
             new_enrichment = extract_enrichment_from_research(cp["research_data"])
             if not new_enrichment:
+                skipped.append(cp["display_name"])
                 continue
+
             existing = cp.get("enrichment_data") or {}
             merged   = {**existing, **new_enrichment}
 
@@ -275,11 +281,16 @@ async def batch_apply_research(
                 "last_enriched_by": current_user.user_id,
             }).eq("counterparty_id", cp["counterparty_id"]).execute()
 
-            run_in_thread(score_single_counterparty, cp["counterparty_id"])
             applied.append(cp["display_name"])
+            print(f"[apply_all] Applied {len(new_enrichment)} fields to {cp['display_name']}")
 
         except Exception as e:
-            print(f"[batch_apply] Error on {cp['display_name']}: {e}")
+            errors.append(cp["display_name"])
+            print(f"[apply_all] Error on {cp['display_name']}: {e}")
+
+    # Single sequential rescore of ALL counterparties (safer than 40 parallel threads)
+    if applied:
+        run_in_thread(score_all_counterparties)
 
     supabase.table("audit_log").insert({
         "tenant_id":      settings.DEFAULT_TENANT_ID,
@@ -287,13 +298,21 @@ async def batch_apply_research(
         "event_type":     "counterparty.batch_apply_research",
         "actor_type":     "USER",
         "actor_id":       current_user.user_id,
-        "metadata":       {"applied_count": len(applied), "entities": applied},
+        "metadata": {
+            "applied_count": len(applied),
+            "skipped_count": len(skipped),
+            "error_count":   len(errors),
+            "applied":       applied,
+            "skipped":       skipped,
+            "errors":        errors,
+        },
     }).execute()
 
     return {
-        "status":  "applied",
-        "applied": len(applied),
-        "entities": applied,
-        "rescore_queued": True,
-        "message": f"Applied research to {len(applied)} counterparties — rescoring all in background",
+        "status":          "applied",
+        "applied":         len(applied),
+        "skipped":         len(skipped),
+        "errors":          len(errors),
+        "rescore_queued":  True,
+        "message":         f"Applied to {len(applied)} counterparties — full rescore running in background (~60s)",
     }

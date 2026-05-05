@@ -100,9 +100,14 @@ function ResearchPanel() {
       const r = await fetch(`${API}/api/v1/admin/research/apply-all`, { method: 'POST', headers: H() })
       const d = await r.json()
       if (!r.ok) throw new Error(d.detail)
-      toast.success(`Applied research to ${d.applied} counterparties — rescoring all`)
+      toast.success(`Applied to ${d.applied} counterparties — rescoring now (~60s)`)
       setRescoring(true)
-      setTimeout(() => { loadStatus(); setRescoring(false) }, 30000)
+      // Reload score table after rescoring completes
+      setTimeout(async () => {
+        await loadCps()  // refresh counterparty scores
+        setRescoring(false)
+        toast.success('Scores updated — check the preview table')
+      }, 70000)
     } catch (e: any) { toast.error(e.message) }
     finally { setApplying(false) }
   }
@@ -241,6 +246,22 @@ export default function AdminPage() {
   const total    = Object.values(weights).reduce((a,b) => a+b, 0)
   const isValid  = Math.abs(total - 1.0) < 0.001
   const hasChanges = JSON.stringify(weights) !== JSON.stringify(savedWeights)
+
+  const loadCps = async () => {
+    try {
+      const cpRes = await fetch(`${API}/api/v1/counterparties`, { headers: H() })
+      if (cpRes.ok) {
+        const cpData = await cpRes.json()
+        const detailed = await Promise.all(
+          cpData.map(async (cp: any) => {
+            const r = await fetch(`${API}/api/v1/counterparties/${cp.counterparty_id}`, { headers: H() })
+            return r.ok ? r.json() : cp
+          })
+        )
+        setCps(detailed)
+      }
+    } catch {}
+  }
 
   const load = async () => {
     setLoading(true)
