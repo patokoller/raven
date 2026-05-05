@@ -515,7 +515,7 @@ async def get_data_sources(
         }
 
     # Nansen (on-chain intelligence)
-    if cp.get("entity_type") in ("exchange", "custodian"):
+    if cp.get("entity_type") in ("exchange", "custodian", "defi_protocol"):
         nansen_result = nansen_provider.enrich_counterparty(
             cp.get("slug",""), cp.get("entity_type",""), cp.get("display_name","")
         )

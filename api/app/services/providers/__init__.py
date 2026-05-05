@@ -125,8 +125,8 @@ def build_counterparty_data(cp: dict) -> dict:
             if dl_data.get("volume_24h_usd"):
                 data.setdefault("volume_24h_usd", dl_data["volume_24h_usd"])
 
-    # ── 1b. Nansen (on-chain reserve intelligence for exchanges) ──
-    if entity_type in ("exchange", "custodian") and settings.NANSEN_API_KEY:
+    # ── 1b. Nansen (on-chain intelligence for exchanges and DeFi) ──
+    if entity_type in ("exchange", "custodian", "defi_protocol") and settings.NANSEN_API_KEY:
         nansen_data = nansen.enrich_counterparty(slug, entity_type, display_name)
         if nansen_data.get("available"):
             data["_sources"].append("nansen")
