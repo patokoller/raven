@@ -146,9 +146,8 @@ def build_counterparty_data(cp: dict) -> dict:
 
     # ── 3b. Zefix (Swiss Commercial Register) ─────────────────
     if cp.get("jurisdiction") == "CH" or cp.get("regulator", "").upper().startswith("FINMA"):
-        if settings.ZEFIX_USERNAME:
-            zefix_data = zefix.enrich_counterparty(slug, display_name)
-            if zefix_data.get("available"):
+        zefix_data = zefix.enrich_counterparty(slug, display_name)
+        if zefix_data.get("available"):
                 data["_sources"].append("zefix")
                 # Registration status is ground truth for Swiss entities
                 if zefix_data.get("license_active") is not None:
@@ -170,9 +169,8 @@ def build_counterparty_data(cp: dict) -> dict:
 
     # ── 3c. FINMA (Swiss regulator — exact licence type) ──────
     if cp.get("jurisdiction") == "CH" or cp.get("regulator","").upper().startswith("FINMA"):
-        if settings.ZEFIX_USERNAME:  # same auth context, FINMA is public
-            finma_data = finma.enrich_counterparty(slug, display_name)
-            if finma_data.get("available"):
+        finma_data = finma.enrich_counterparty(slug, display_name)  # public API, no auth
+        if finma_data.get("available"):
                 data["_sources"].append("finma")
                 # FINMA licence status overrides everything for CH entities
                 if finma_data.get("license_active") is not None:

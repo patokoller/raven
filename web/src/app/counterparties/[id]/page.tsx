@@ -95,6 +95,15 @@ function DimensionBar({ label, score, weight }: any) {
 
 // ── Research finding card ─────────────────────────────────────
 
+function stripCitations(text: string): string {
+  if (!text) return text
+  return text
+    .replace(/<cite[^>]*>/g, '')
+    .replace(/<\/cite>/g, '')
+    .replace(/  +/g, ' ')
+    .trim()
+}
+
 function FindingCard({ dimKey, fieldKey, finding, selected, onToggle, onApplySingle }: any) {
   const hasValue = finding?.value !== null && finding?.value !== undefined
   const conf = finding?.confidence || 'none'
@@ -141,13 +150,13 @@ function FindingCard({ dimKey, fieldKey, finding, selected, onToggle, onApplySin
             <div className="text-sm mb-1.5">{valueDisplay()}</div>
             {finding?.evidence && (
               <p className="text-xs text-ink-mid leading-relaxed line-clamp-3">
-                {finding.evidence}
+                {stripCitations(finding.evidence)}
               </p>
             )}
             {finding?.source && (
               <div className="flex items-center gap-1 mt-1.5">
                 <Globe className="w-3 h-3 text-ink-mid flex-shrink-0" />
-                <span className="text-[10px] text-ink-mid truncate">{finding.source}</span>
+                <span className="text-[10px] text-ink-mid truncate">{stripCitations(finding.source)}</span>
               </div>
             )}
           </div>
@@ -601,25 +610,48 @@ export default function CounterpartyDetailPage() {
               <div className="text-xs text-ink-mid">Loading…</div>
             ) : (
               <div className="space-y-2">
-                {Object.entries(dataSources.sources || {}).map(([key, src]: any) => (
-                  <div key={key} className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${src.available ? 'bg-teal' : 'bg-surface-2'}`} />
-                      <span className="text-xs">{src.name}</span>
+                {Object.entries(dataSources.sources || {}).map(([key, src]: any) => {
+                  const fields = Object.keys(src.data || {}).filter(k =>
+                    !['source','available','fetched_at','note'].includes(k) &&
+                    src.data[k] !== null && src.data[k] !== undefined
+                  ).length
+                  return (
+                    <div key={key}>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                            src.available ? 'bg-teal' : 'bg-surface-2 border border-border'
+                          }`} />
+                          <span className="text-xs">{src.name}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {src.available ? (
+                            <>
+                              <span className="text-[10px] font-mono text-teal">
+                                {fields > 0 ? `${fields} fields` : 'connected'}
+                              </span>
+                              {src.url && (
+                                <a href={src.url} target="_blank" rel="noreferrer"
+                                  className="text-[10px] text-ink-mid hover:text-ink underline">
+                                  view →
+                                </a>
+                              )}
+                            </>
+                          ) : (
+                            <span className="text-[10px] text-ink-mid">
+                              not applicable
+                            </span>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span className={`text-[10px] font-mono ${src.available ? 'text-teal' : 'text-ink-mid'}`}>
-                        {src.available ? 'connected' : 'n/a'}
-                      </span>
-                      {src.available && src.url && (
-                        <a href={src.url} target="_blank" rel="noreferrer"
-                          className="text-[10px] text-ink-mid hover:text-ink underline">
-                          view →
-                        </a>
-                      )}
-                    </div>
-                  </div>
-                ))}
+                  )
+                })}
+                <div className="pt-2 border-t border-border mt-2">
+                  <p className="text-[10px] text-ink-mid leading-relaxed">
+                    Sources marked "not applicable" don't cover this entity type or jurisdiction. AI web search fills these gaps during research.
+                  </p>
+                </div>
               </div>
             )}
           </div>

@@ -89,9 +89,15 @@ def search_company(name: str, active_only: bool = True) -> list:
             timeout=12,
         )
         if r.status_code == 200:
-            return r.json()
+            data = r.json()
+            # Handle both list response and dict with 'list' key
+            if isinstance(data, list):
+                return data
+            if isinstance(data, dict):
+                return data.get("list", data.get("items", data.get("results", [])))
+            return []
         elif r.status_code == 401:
-            print("[zefix] Authentication failed — check credentials")
+            print("[zefix] Authentication failed — check ZEFIX_USERNAME/PASSWORD secrets in Fly.io")
         else:
             print(f"[zefix] Search error {r.status_code}: {r.text[:200]}")
     except Exception as e:
@@ -104,23 +110,33 @@ def get_company_by_uid(uid: str) -> Optional[dict]:
     Fetch full company details by UID (CHE-xxx.xxx.xxx format).
     Returns complete company record.
     """
-    # Normalise UID format
-    uid_clean = uid.replace("CHE-", "").replace(".", "").strip()
-    try:
-        r = httpx.get(
-            f"{ZEFIX_BASE}/company/uid/CHE{uid_clean}",
-            auth=_auth(),
-            headers=_headers(),
-            timeout=12,
-        )
-        if r.status_code == 200:
-            return r.json()
-        elif r.status_code == 404:
-            print(f"[zefix] UID {uid} not found")
-        else:
-            print(f"[zefix] UID lookup error {r.status_code}")
-    except Exception as e:
-        print(f"[zefix] UID lookup exception: {e}")
+    # Zefix accepts CHE-XXX.XXX.XXX format directly
+    uid_formatted = uid if uid.startswith("CHE-") else f"CHE-{uid}"
+    # Also prepare numeric-only version
+    uid_numeric = uid.replace("CHE-", "").replace(".", "").strip()
+
+    # Try formatted version first (CHE-184.974.020)
+    urls_to_try = [
+        f"{ZEFIX_BASE}/company/uid/{uid_formatted}",
+        f"{ZEFIX_BASE}/company/uid/CHE{uid_numeric}",
+    ]
+
+    for url in urls_to_try:
+        try:
+            r = httpx.get(url, auth=_auth(), headers=_headers(), timeout=12)
+            if r.status_code == 200:
+                data = r.json()
+                # Zefix returns a list of companies for UID lookup — take first
+                if isinstance(data, list):
+                    return data[0] if data else None
+                return data
+            elif r.status_code == 401:
+                print(f"[zefix] Auth failed — check ZEFIX_USERNAME/PASSWORD")
+                return None
+        except Exception as e:
+            print(f"[zefix] UID lookup error {url}: {e}")
+
+    print(f"[zefix] UID {uid} not found in any format")
     return None
 
 

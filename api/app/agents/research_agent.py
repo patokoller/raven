@@ -18,6 +18,43 @@ from app.core.database import supabase
 client = Anthropic(api_key=settings.ANTHROPIC_API_KEY)
 
 
+def _strip_citations(text: str) -> str:
+    """
+    Remove <cite index="...">...</cite> tags from Claude web search output.
+    Keeps the inner text content, removes the XML wrapper.
+    """
+    import re
+    if not text or not isinstance(text, str):
+        return text
+    # Remove cite tags but keep inner content
+    text = re.sub(r'<cite[^>]*>', '', text)
+    text = re.sub(r'</cite>', '', text)
+    # Clean up any double spaces or leading/trailing whitespace
+    text = re.sub(r'  +', ' ', text).strip()
+    return text
+
+
+def _clean_findings(findings: dict) -> dict:
+    """Strip citation tags from all evidence and source fields in findings."""
+    if not isinstance(findings, dict):
+        return findings
+    cleaned = {}
+    for dim_key, dim_data in findings.items():
+        if not isinstance(dim_data, dict):
+            cleaned[dim_key] = dim_data
+            continue
+        cleaned[dim_key] = {}
+        for field_key, field_data in dim_data.items():
+            if not isinstance(field_data, dict):
+                cleaned[dim_key][field_key] = field_data
+                continue
+            cleaned[dim_key][field_key] = {
+                k: _strip_citations(v) if isinstance(v, str) else v
+                for k, v in field_data.items()
+            }
+    return cleaned
+
+
 SYSTEM_PROMPT = """You are a counterparty risk research agent for a Swiss institutional digital asset platform.
 Research a counterparty and extract structured data. For each field: search for it, cite the source URL, assign confidence (high/medium/low/none), provide the value.
 Never invent data. Output ONLY valid JSON. No preamble."""
@@ -283,6 +320,12 @@ After thorough research, return your findings in the exact JSON schema provided.
 
     # Parse JSON from response
     parsed = _extract_json(final_text)
+    # Clean citation tags from all text fields
+    if "findings" in parsed:
+        parsed["findings"] = _clean_findings(parsed["findings"])
+    if "research_summary" in parsed and isinstance(parsed["research_summary"], str):
+        parsed["research_summary"] = _strip_citations(parsed["research_summary"])
+
     parsed["researched_at"]    = datetime.utcnow().isoformat()
     parsed["agent_model"]      = settings.ANTHROPIC_MODEL
     parsed["counterparty_id"]  = cp["counterparty_id"]
