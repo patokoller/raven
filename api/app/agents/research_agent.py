@@ -18,6 +18,52 @@ from app.core.database import supabase
 client = Anthropic(api_key=settings.ANTHROPIC_API_KEY)
 
 
+
+def _fetch_regulatory_context(entity_type: str, jurisdiction: str) -> str:
+    """Fetch relevant regulatory guidance to inject into the research prompt."""
+    try:
+        from app.core.database import supabase
+        from app.core.config import settings as _settings
+
+        docs = (
+            supabase.table("regulatory_documents")
+            .select("doc_ref, title, regulator, published_date, criticality, summary, full_analysis")
+            .eq("tenant_id", _settings.DEFAULT_TENANT_ID)
+            .in_("status", ["analysed", "reviewed", "applied"])
+            .in_("criticality", ["CRITICAL", "HIGH", "MEDIUM"])
+            .order("published_date", desc=True)
+            .limit(5)
+            .execute()
+            .data
+        ) or []
+
+        if not docs:
+            return ""
+
+        lines = ["REGULATORY CONTEXT - Reference this in your findings:"]
+        for doc in docs[:3]:
+            analysis = doc.get("full_analysis") or {}
+            lines.append(f"[{doc['criticality']}] {doc.get('doc_ref', '')} - {doc['title']}")
+            if doc.get("summary"):
+                lines.append(f"Summary: {doc['summary'][:350]}")
+            for req in (analysis.get("key_requirements") or [])[:3]:
+                lines.append(f"  * {req}")
+            for cp in (analysis.get("affected_counterparties") or []):
+                if isinstance(cp, dict) and cp.get("name"):
+                    lines.append(f"  -> {cp['name']}: {cp.get('reason','')} [{cp.get('impact','')}]")
+            lines.append("")
+
+        lines.append(
+            "For custodians: explicitly state whether this entity meets prudential supervision "
+            "and bankruptcy protection requirements under the above guidance."
+        )
+        return "\n".join(lines)
+
+    except Exception as e:
+        print(f"[research_agent] Could not fetch regulatory context: {e}")
+        return ""
+
+
 def _strip_citations(text: str) -> str:
     """
     Remove <cite index="...">...</cite> tags from Claude web search output.
@@ -233,6 +279,9 @@ def _research_counterparty(cp: dict) -> dict:
     if gleif_result.get("available"):
         api_data["gleif"] = gleif_result
         api_sources.append("GLEIF LEI Register")
+
+    # Fetch regulatory context from the database
+    regulatory_context = _fetch_regulatory_context(entity_type, jurisdiction)
 
     # Build API context string for the prompt
     api_context = ""
