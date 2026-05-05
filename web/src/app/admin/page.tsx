@@ -59,7 +59,7 @@ function previewScore(cp: any, weights: Record<string,number>): number | null {
 
 // ── Research Status Panel ─────────────────────────────────────
 
-function ResearchPanel() {
+function ResearchPanel({ onScoresReload }: { onScoresReload: () => Promise<void> }) {
   const [status, setStatus]       = useState<any>(null)
   const [loading, setLoading]     = useState(false)
   const [running, setRunning]     = useState(false)
@@ -104,7 +104,7 @@ function ResearchPanel() {
       setRescoring(true)
       // Reload score table after rescoring completes
       setTimeout(async () => {
-        await loadCps()  // refresh counterparty scores
+        await onScoresReload()  // refresh counterparty scores
         setRescoring(false)
         toast.success('Scores updated — check the preview table')
       }, 70000)
@@ -333,7 +333,7 @@ export default function AdminPage() {
       <div className="p-8 space-y-6">
 
         {/* Batch Research Panel */}
-        <ResearchPanel />
+        <ResearchPanel onScoresReload={loadCps} />
 
         {/* Score Calibration */}
         <div className="grid grid-cols-5 gap-6">
