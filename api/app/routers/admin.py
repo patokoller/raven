@@ -164,7 +164,7 @@ async def batch_research(
         for cp_id in counterparty_ids:
             try:
                 run_research_agent(cp_id)
-                time.sleep(3)  # 3s between each to avoid rate limits
+                time.sleep(15)  # 15s between each — respects 30k token/min limit
             except Exception as e:
                 print(f"[batch_research] Error on {cp_id}: {e}")
 
@@ -184,7 +184,7 @@ async def batch_research(
         "status":   "started",
         "queued":   len(ids),
         "skipped":  len(cps) - len(ids),
-        "message":  f"Researching {len(ids)} counterparties sequentially. Takes ~{len(ids)*3} minutes total.",
+        "message":  f"Researching {len(ids)} counterparties sequentially. Takes ~{len(ids)*2} minutes total (Haiku model, 15s between each).",
         "entities": [cp["display_name"] for cp in to_research],
     }
 

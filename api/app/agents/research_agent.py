@@ -18,24 +18,9 @@ from app.core.database import supabase
 client = Anthropic(api_key=settings.ANTHROPIC_API_KEY)
 
 
-SYSTEM_PROMPT = """You are the Counterparty Research Agent for Raven, a Swiss institutional 
-digital asset risk intelligence platform.
-
-Your task: research a specific counterparty and extract structured data for 6 scoring dimensions.
-
-For each field you research:
-1. Search for specific, verifiable information
-2. Cite your exact source (URL or publication name)
-3. Assign a confidence level: "high" (confirmed from primary source), "medium" (credible secondary source), "low" (inferred or indirect)
-4. Provide a recommended value in the exact format specified
-5. If no data found, set value to null and confidence to "none"
-
-Be precise and factual. Never invent data. If uncertain, say so explicitly.
-Use FINMA, FCA, SEC, and other regulatory primary sources where possible.
-For news sentiment, search recent articles from the last 30 days.
-For on-chain data, use DefiLlama and public blockchain data.
-
-Output ONLY valid JSON matching the schema provided. No preamble or explanation outside JSON."""
+SYSTEM_PROMPT = """You are a counterparty risk research agent for a Swiss institutional digital asset platform.
+Research a counterparty and extract structured data. For each field: search for it, cite the source URL, assign confidence (high/medium/low/none), provide the value.
+Never invent data. Output ONLY valid JSON. No preamble."""
 
 
 RESEARCH_SCHEMA = """
@@ -201,14 +186,31 @@ After thorough research, return your findings in the exact JSON schema provided.
 
 {RESEARCH_SCHEMA}"""
 
-    # Call Claude with web search enabled
-    response = client.messages.create(
-        model=settings.ANTHROPIC_MODEL,
-        max_tokens=8000,
-        system=SYSTEM_PROMPT,
-        tools=[{"type": "web_search_20250305", "name": "web_search"}],
-        messages=[{"role": "user", "content": user_prompt}],
-    )
+    # Use Haiku for research — 100k token/min limit vs 30k for Opus
+    # Haiku is fast, cheap, and sufficient for structured data extraction
+    RESEARCH_MODEL = "claude-haiku-4-5-20251001"
+
+    # Retry with exponential backoff on rate limit errors
+    import time
+    from anthropic import RateLimitError
+
+    max_retries = 4
+    for attempt in range(max_retries):
+        try:
+            response = client.messages.create(
+                model=RESEARCH_MODEL,
+                max_tokens=4000,
+                system=SYSTEM_PROMPT,
+                tools=[{"type": "web_search_20250305", "name": "web_search"}],
+                messages=[{"role": "user", "content": user_prompt}],
+            )
+            break  # success
+        except RateLimitError as e:
+            if attempt == max_retries - 1:
+                raise
+            wait = (2 ** attempt) * 30  # 30s, 60s, 120s, 240s
+            print(f"[research] Rate limited on {cp.get('display_name')} — waiting {wait}s (attempt {attempt+1}/{max_retries})")
+            time.sleep(wait)
 
     # Extract the final text response (after tool use)
     final_text = ""
