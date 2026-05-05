@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     ZEFIX_USERNAME: str = ""
     ZEFIX_PASSWORD: str = ""
 
+    # Nansen (on-chain intelligence)
+    NANSEN_API_KEY: str = ""
+
     # Storage
     STORAGE_BUCKET: str = "raven-reports"
 

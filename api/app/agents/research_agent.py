@@ -280,6 +280,17 @@ def _research_counterparty(cp: dict) -> dict:
         api_data["gleif"] = gleif_result
         api_sources.append("GLEIF LEI Register")
 
+    # Nansen (on-chain reserve intelligence for exchanges/custodians)
+    if entity_type in ("exchange", "custodian"):
+        from app.services.providers import nansen as nansen_provider
+        nansen_result = nansen_provider.enrich_counterparty(cp.get("slug",""), entity_type, name)
+        if nansen_result.get("available"):
+            api_data["nansen"] = {
+                k: v for k, v in nansen_result.items()
+                if k not in ("source","available","fetched_at","nansen_reserves_url")
+            }
+            api_sources.append("Nansen On-Chain Intelligence")
+
     # Fetch regulatory context from the database
     regulatory_context = _fetch_regulatory_context(entity_type, jurisdiction)
 

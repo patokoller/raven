@@ -16,7 +16,7 @@ import httpx
 from datetime import datetime
 from typing import Optional
 from app.core.config import settings
-from app.services.providers import defillama, edgar, fca, zefix, finma, uid_gleif
+from app.services.providers import defillama, edgar, fca, zefix, finma, uid_gleif, nansen
 
 
 def fetch_coingecko_exchange(slug: str) -> dict:
@@ -124,6 +124,26 @@ def build_counterparty_data(cp: dict) -> dict:
                 data.setdefault("audit_count", dl_data["audit_count"])
             if dl_data.get("volume_24h_usd"):
                 data.setdefault("volume_24h_usd", dl_data["volume_24h_usd"])
+
+    # ── 1b. Nansen (on-chain reserve intelligence for exchanges) ──
+    if entity_type in ("exchange", "custodian") and settings.NANSEN_API_KEY:
+        nansen_data = nansen.enrich_counterparty(slug, entity_type, display_name)
+        if nansen_data.get("available"):
+            data["_sources"].append("nansen")
+            # Nansen reserve trend takes priority over DefiLlama for exchanges
+            if nansen_data.get("onchain_reserve_trend_30d"):
+                data["onchain_reserve_trend_30d"] = nansen_data["onchain_reserve_trend_30d"]
+            if nansen_data.get("reserve_quality"):
+                data.setdefault("reserve_quality", nansen_data["reserve_quality"])
+            if nansen_data.get("total_reserves_usd"):
+                data["_nansen"] = {
+                    "total_reserves_usd":  nansen_data.get("total_reserves_usd"),
+                    "btc_reserves_usd":    nansen_data.get("btc_reserves_usd"),
+                    "eth_reserves_usd":    nansen_data.get("eth_reserves_usd"),
+                    "stable_reserves_usd": nansen_data.get("stable_reserves_usd"),
+                    "reserve_quality":     nansen_data.get("reserve_quality"),
+                    "url":                 nansen_data.get("nansen_reserves_url"),
+                }
 
     # ── 2. SEC EDGAR ──────────────────────────────────────────
     edgar_data = edgar.enrich_counterparty(slug)

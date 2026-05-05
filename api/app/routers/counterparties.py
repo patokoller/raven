@@ -468,7 +468,7 @@ async def get_data_sources(
     Fetch live data from all providers for a counterparty and return
     what each source contributes. Used for the data sources panel.
     """
-    from app.services.providers import defillama, edgar, fca as fca_provider, zefix as zefix_provider, finma as finma_provider, uid_gleif
+    from app.services.providers import defillama, edgar, fca as fca_provider, zefix as zefix_provider, finma as finma_provider, uid_gleif, nansen as nansen_provider
 
     cp = (
         supabase.table("counterparties")
@@ -512,6 +512,20 @@ async def get_data_sources(
             "data": {k: v for k, v in fca_result.items()
                      if k not in ("source","available","fetched_at")} if fca_result.get("available") else {},
             "url": f"https://register.fca.org.uk/s/firm?id={fca_result.get('frn','')}",
+        }
+
+    # Nansen (on-chain intelligence)
+    if cp.get("entity_type") in ("exchange", "custodian"):
+        nansen_result = nansen_provider.enrich_counterparty(
+            cp.get("slug",""), cp.get("entity_type",""), cp.get("display_name","")
+        )
+        sources["nansen"] = {
+            "name": "Nansen On-Chain Intelligence",
+            "available": nansen_result.get("available", False),
+            "data": {k: v for k, v in nansen_result.items()
+                     if k not in ("source","available","fetched_at","agent_answer") and v is not None
+                     } if nansen_result.get("available") else {},
+            "url": nansen_result.get("nansen_reserves_url", f"https://app.nansen.ai"),
         }
 
     # Zefix (Swiss Commercial Register)
