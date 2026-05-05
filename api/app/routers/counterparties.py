@@ -457,3 +457,75 @@ async def apply_research(
         "fields_applied": fields_to_apply,
         "rescore_queued": True,
     }
+
+
+@router.get("/{counterparty_id}/data-sources")
+async def get_data_sources(
+    counterparty_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """
+    Fetch live data from all providers for a counterparty and return
+    what each source contributes. Used for the data sources panel.
+    """
+    from app.services.providers import defillama, edgar, fca as fca_provider
+
+    cp = (
+        supabase.table("counterparties")
+        .select("*")
+        .eq("counterparty_id", str(counterparty_id))
+        .single()
+        .execute()
+        .data
+    )
+    if not cp:
+        raise HTTPException(status_code=404, detail="Counterparty not found")
+
+    sources = {}
+
+    # DefiLlama
+    if cp.get("entity_type") in ("defi_protocol", "exchange"):
+        dl = defillama.enrich_counterparty(cp.get("slug",""), cp.get("entity_type",""))
+        sources["defillama"] = {
+            "name": "DefiLlama",
+            "available": bool(dl.get("tvl_usd") or dl.get("volume_24h_usd")),
+            "data": dl,
+            "url": f"https://defillama.com/protocol/{cp.get('slug','')}",
+        }
+
+    # SEC EDGAR
+    edgar_result = edgar.enrich_counterparty(cp.get("slug",""))
+    sources["edgar"] = {
+        "name": "SEC EDGAR",
+        "available": edgar_result.get("available", False),
+        "data": {k: v for k, v in edgar_result.items()
+                 if k not in ("source","available","fetched_at")} if edgar_result.get("available") else {},
+        "url": f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={edgar_result.get('cik','')}",
+    }
+
+    # FCA Register
+    if cp.get("jurisdiction") == "GB" or "FCA" in (cp.get("regulator","").upper()):
+        fca_result = fca_provider.enrich_counterparty(cp.get("slug",""), cp.get("display_name",""))
+        sources["fca"] = {
+            "name": "FCA Register",
+            "available": fca_result.get("available", False),
+            "data": {k: v for k, v in fca_result.items()
+                     if k not in ("source","available","fetched_at")} if fca_result.get("available") else {},
+            "url": f"https://register.fca.org.uk/s/firm?id={fca_result.get('frn','')}",
+        }
+
+    # CoinGecko
+    if cp.get("entity_type") == "exchange":
+        sources["coingecko"] = {
+            "name": "CoinGecko",
+            "available": bool(settings.COINGECKO_API_KEY),
+            "data": {"note": "Volume and trust score fetched during scoring"},
+            "url": f"https://www.coingecko.com/en/exchanges/{cp.get('slug','')}",
+        }
+
+    return {
+        "counterparty_id": str(counterparty_id),
+        "entity_name":     cp["display_name"],
+        "sources":         sources,
+        "fetched_at":      datetime.utcnow().isoformat(),
+    }

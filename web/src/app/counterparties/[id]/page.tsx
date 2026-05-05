@@ -4,7 +4,7 @@ import { useParams } from 'next/navigation'
 import AppLayout from '@/components/layout/AppLayout'
 import PageHeader from '@/components/layout/PageHeader'
 import {
-  Save, RefreshCw, ChevronDown, ChevronUp,
+  Save, RefreshCw, ChevronDown, ChevronUp, Globe,
   AlertTriangle, Sparkles, CheckCircle, XCircle,
   Clock, Database, Globe, Search
 } from 'lucide-react'
@@ -443,6 +443,8 @@ export default function CounterpartyDetailPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving]   = useState(false)
   const [dirty, setDirty]     = useState(false)
+  const [dataSources, setDataSources] = useState<any>(null)
+  const [loadingSources, setLoadingSources] = useState(false)
   const [tab, setTab]         = useState<'research'|'manual'>('research')
 
   const load = async () => {
@@ -465,7 +467,15 @@ export default function CounterpartyDetailPage() {
     finally { setLoading(false) }
   }
 
-  useEffect(() => { if (id) load() }, [id])
+  const fetchDataSources = async () => {
+    setLoadingSources(true)
+    try {
+      const r = await fetch(`${API}/api/v1/counterparties/${id}/data-sources`, { headers: H() })
+      if (r.ok) setDataSources(await r.json())
+    } catch {} finally { setLoadingSources(false) }
+  }
+
+  useEffect(() => { if (id) { load(); fetchDataSources() } }, [id])
 
   const update = (field: string, value: any) => {
     setEnrich((prev: any) => ({ ...prev, [field]: value }))
@@ -578,6 +588,40 @@ export default function CounterpartyDetailPage() {
                 </div>
               )
             })}
+          </div>
+          {/* Data Sources panel */}
+          <div className="card p-5">
+            <div className="label mb-3 flex items-center justify-between">
+              Data Sources
+              <button onClick={fetchDataSources} className="text-ink-mid hover:text-ink">
+                <RefreshCw className={`w-3 h-3 ${loadingSources ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
+            {!dataSources ? (
+              <div className="text-xs text-ink-mid">Loading…</div>
+            ) : (
+              <div className="space-y-2">
+                {Object.entries(dataSources.sources || {}).map(([key, src]: any) => (
+                  <div key={key} className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${src.available ? 'bg-teal' : 'bg-surface-2'}`} />
+                      <span className="text-xs">{src.name}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-[10px] font-mono ${src.available ? 'text-teal' : 'text-ink-mid'}`}>
+                        {src.available ? 'connected' : 'n/a'}
+                      </span>
+                      {src.available && src.url && (
+                        <a href={src.url} target="_blank" rel="noreferrer"
+                          className="text-[10px] text-ink-mid hover:text-ink underline">
+                          view →
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 

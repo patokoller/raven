@@ -139,13 +139,53 @@ def run_research_agent(counterparty_id: str) -> dict:
 def _research_counterparty(cp: dict) -> dict:
     """
     Run the Claude agent with web search for a specific counterparty.
-    Uses a structured multi-step research approach.
+    Pre-fetches from DefiLlama, SEC EDGAR, and FCA Register first,
+    then uses Claude web search for anything not found via APIs.
     """
+    from app.services.providers import build_counterparty_data
+    from app.services.providers import defillama, edgar, fca as fca_provider
+
     name         = cp["display_name"]
     entity_type  = cp["entity_type"]
     jurisdiction = cp.get("jurisdiction", "")
     regulator    = cp.get("regulator", "")
     website      = cp.get("website", "")
+
+    # Pre-fetch structured data from APIs
+    api_data = {}
+    api_sources = []
+
+    # DefiLlama
+    if entity_type in ("defi_protocol", "exchange"):
+        dl = defillama.enrich_counterparty(cp.get("slug",""), entity_type)
+        if dl and (dl.get("tvl_usd") or dl.get("volume_24h_usd")):
+            api_data["defillama"] = dl
+            api_sources.append("DefiLlama")
+
+    # SEC EDGAR
+    edgar_result = edgar.enrich_counterparty(cp.get("slug",""))
+    if edgar_result.get("available"):
+        api_data["edgar"] = edgar_result
+        api_sources.append("SEC EDGAR")
+
+    # FCA Register
+    if jurisdiction == "GB" or "FCA" in regulator.upper():
+        fca_result = fca_provider.enrich_counterparty(cp.get("slug",""), name)
+        if fca_result.get("available"):
+            api_data["fca"] = fca_result
+            api_sources.append("FCA Register")
+
+    # Build API context string for the prompt
+    api_context = ""
+    if api_data:
+        import json
+        api_context = f"""
+STRUCTURED DATA ALREADY RETRIEVED FROM APIS (use this as ground truth):
+{json.dumps(api_data, indent=2, default=str)}
+
+Sources confirmed: {", ".join(api_sources)}
+Use web search to fill gaps not covered by the above data.
+"""
 
     # Build the research prompt
     user_prompt = f"""Research the following counterparty for our institutional risk scoring system.
@@ -156,6 +196,7 @@ JURISDICTION: {jurisdiction}
 REGULATOR: {regulator}
 WEBSITE: {website}
 
+{api_context}
 RESEARCH INSTRUCTIONS:
 
 1. REGULATORY: Search "{name} license {regulator}" and "{name} regulatory status". 
