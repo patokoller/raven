@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     ALPACA_API_KEY: str = ""
     ALPACA_API_SECRET: str = ""
 
+    # Zefix (Swiss Commercial Register)
+    ZEFIX_USERNAME: str = ""
+    ZEFIX_PASSWORD: str = ""
+
     # Storage
     STORAGE_BUCKET: str = "raven-reports"
 
