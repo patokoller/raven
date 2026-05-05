@@ -16,7 +16,7 @@ import httpx
 from datetime import datetime
 from typing import Optional
 from app.core.config import settings
-from app.services.providers import defillama, edgar, fca
+from app.services.providers import defillama, edgar, fca, zefix
 
 
 def fetch_coingecko_exchange(slug: str) -> dict:
@@ -143,6 +143,30 @@ def build_counterparty_data(cp: dict) -> dict:
                 data.setdefault("license_active", fca_data["license_active"])
             if fca_data.get("enforcement_actions_12m") is not None:
                 data.setdefault("enforcement_actions_12m", fca_data["enforcement_actions_12m"])
+
+    # ── 3b. Zefix (Swiss Commercial Register) ─────────────────
+    if cp.get("jurisdiction") == "CH" or cp.get("regulator", "").upper().startswith("FINMA"):
+        if settings.ZEFIX_USERNAME:
+            zefix_data = zefix.enrich_counterparty(slug, display_name)
+            if zefix_data.get("available"):
+                data["_sources"].append("zefix")
+                # Registration status is ground truth for Swiss entities
+                if zefix_data.get("license_active") is not None:
+                    data["license_active"] = zefix_data["license_active"]  # override, not setdefault
+                if zefix_data.get("years_in_operation") is not None:
+                    data.setdefault("years_in_operation", zefix_data["years_in_operation"])
+                if zefix_data.get("enforcement_actions_12m") is not None:
+                    data.setdefault("enforcement_actions_12m", zefix_data["enforcement_actions_12m"])
+                # Store extra Zefix metadata in data for audit trail
+                data["_zefix"] = {
+                    "uid":                zefix_data.get("uid"),
+                    "legal_form":         zefix_data.get("legal_form"),
+                    "registration_date":  zefix_data.get("registration_date"),
+                    "registered_office":  zefix_data.get("registered_office"),
+                    "in_liquidation":     zefix_data.get("in_liquidation"),
+                    "publication_count":  zefix_data.get("publication_count_12m"),
+                    "registry_url":       zefix_data.get("registry_url"),
+                }
 
     # ── 4. CoinGecko ──────────────────────────────────────────
     if entity_type == "exchange":

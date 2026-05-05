@@ -175,6 +175,14 @@ def _research_counterparty(cp: dict) -> dict:
             api_data["fca"] = fca_result
             api_sources.append("FCA Register")
 
+    # Zefix (Swiss Commercial Register)
+    if jurisdiction == "CH" or "FINMA" in regulator.upper():
+        from app.services.providers import zefix as zefix_provider
+        zefix_result = zefix_provider.enrich_counterparty(cp.get("slug",""), name)
+        if zefix_result.get("available"):
+            api_data["zefix"] = zefix_result
+            api_sources.append("Zefix (Swiss Commercial Register)")
+
     # Build API context string for the prompt
     api_context = ""
     if api_data:
