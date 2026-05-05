@@ -42,13 +42,6 @@ function ScoreBar({ score }: { score?: number | null }) {
         <div className="h-full rounded-full" style={{ width: `${score}%`, background: color }} />
       </div>
       <span className="text-xs font-mono text-ink-mid">{score.toFixed(0)}</span>
-      {selectedAlert && (
-        <AlertModal
-          alertId={selectedAlert}
-          onClose={() => setSelectedAlert(null)}
-          onAction={load}
-        />
-      )}
     </div>
   )
 }
@@ -187,6 +180,13 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
+      {selectedAlert && (
+        <AlertModal
+          alertId={selectedAlert}
+          onClose={() => setSelectedAlert(null)}
+          onAction={load}
+        />
+      )}
     </AppLayout>
   )
 }
