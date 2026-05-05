@@ -5,6 +5,8 @@ import { TrendingDown, TrendingUp, Minus, RefreshCw, Activity, AlertTriangle } f
 import AppLayout from '@/components/layout/AppLayout'
 import PageHeader from '@/components/layout/PageHeader'
 import toast from 'react-hot-toast'
+import dynamic from 'next/dynamic'
+const AlertModal = dynamic(() => import('@/components/dashboard/AlertModal'), { ssr: false })
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
@@ -40,6 +42,13 @@ function ScoreBar({ score }: { score?: number | null }) {
         <div className="h-full rounded-full" style={{ width: `${score}%`, background: color }} />
       </div>
       <span className="text-xs font-mono text-ink-mid">{score.toFixed(0)}</span>
+      {selectedAlert && (
+        <AlertModal
+          alertId={selectedAlert}
+          onClose={() => setSelectedAlert(null)}
+          onAction={load}
+        />
+      )}
     </div>
   )
 }
@@ -49,6 +58,7 @@ export default function DashboardPage() {
   const [alerts, setAlerts] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [scoring, setScoring] = useState(false)
+  const [selectedAlert, setSelectedAlert] = useState<string | null>(null)
 
   const load = async () => {
     setLoading(true)

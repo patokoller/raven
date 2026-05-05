@@ -4,6 +4,8 @@ import AppLayout from '@/components/layout/AppLayout'
 import PageHeader from '@/components/layout/PageHeader'
 import { AlertTriangle, CheckCircle, ArrowUpCircle, XCircle } from 'lucide-react'
 import toast from 'react-hot-toast'
+import dynamic from 'next/dynamic'
+const AlertModal = dynamic(() => import('@/components/dashboard/AlertModal'), { ssr: false })
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 const H = () => ({ Authorization: `Bearer ${localStorage.getItem('raven_token')}`, 'Content-Type': 'application/json' })
@@ -19,6 +21,7 @@ export default function AlertsPage() {
   const [alerts, setAlerts] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter]   = useState('open')
+  const [selectedAlert, setSelectedAlert] = useState<string | null>(null)
 
   const load = async () => {
     setLoading(true)
@@ -78,7 +81,7 @@ export default function AlertsPage() {
         ) : (
           <div className="space-y-3">
             {visible.map((a: any) => (
-              <div key={a.alert_id} className="card p-5">
+              <div key={a.alert_id} className="card p-5 cursor-pointer hover:shadow-md transition-shadow" onClick={() => setSelectedAlert(a.alert_id)}>
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex items-start gap-3 flex-1">
                     <AlertTriangle className={`w-4 h-4 mt-0.5 flex-shrink-0 ${
@@ -124,6 +127,13 @@ export default function AlertsPage() {
           </div>
         )}
       </div>
+      {selectedAlert && (
+        <AlertModal
+          alertId={selectedAlert}
+          onClose={() => setSelectedAlert(null)}
+          onAction={load}
+        />
+      )}
     </AppLayout>
   )
 }
