@@ -242,6 +242,8 @@ export default function AdminPage() {
   const [loading, setLoading]     = useState(true)
   const [saving, setSaving]       = useState(false)
   const [rescoring, setRescoring] = useState(false)
+  const [weightSource, setWeightSource] = useState<string | null>(null)
+  const [weightUpdatedAt, setWeightUpdatedAt] = useState<string | null>(null)
 
   const total    = Object.values(weights).reduce((a,b) => a+b, 0)
   const isValid  = Math.abs(total - 1.0) < 0.001
