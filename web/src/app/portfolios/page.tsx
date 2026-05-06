@@ -15,6 +15,7 @@ export default function PortfoliosPage() {
   const [loading, setLoading]       = useState(true)
   const [uploading, setUploading]   = useState(false)
   const [showUpload, setShowUpload] = useState(false)
+  const [deleting, setDeleting]       = useState<string | null>(null)
   const [file, setFile]             = useState<File | null>(null)
   const [form, setForm] = useState({
     client_id: '',
