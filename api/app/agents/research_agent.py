@@ -280,6 +280,15 @@ def _research_counterparty(cp: dict) -> dict:
         api_data["gleif"] = gleif_result
         api_sources.append("GLEIF LEI Register")
 
+    # Sanctions screening (OFAC + EU + UN — always run for all entities)
+    from app.services.providers import sanctions as sanctions_provider
+    sanctions_result = sanctions_provider.screen_counterparty(name, cp.get("legal_name"))
+    if sanctions_result.get("any_match"):
+        api_data["sanctions_HIT"] = sanctions_result
+        api_sources.append("⚠️ SANCTIONS MATCH")
+    else:
+        api_sources.append("Sanctions Screening (CLEAR)")
+
     # Nansen (on-chain reserve intelligence for exchanges/custodians)
     if entity_type in ("exchange", "custodian"):
         from app.services.providers import nansen as nansen_provider

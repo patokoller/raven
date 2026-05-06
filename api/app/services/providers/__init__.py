@@ -16,7 +16,7 @@ import httpx
 from datetime import datetime
 from typing import Optional
 from app.core.config import settings
-from app.services.providers import defillama, edgar, fca, zefix, finma, uid_gleif, nansen
+from app.services.providers import defillama, edgar, fca, zefix, finma, uid_gleif, nansen, defillama_cex, sanctions
 
 
 def fetch_coingecko_exchange(slug: str) -> dict:
@@ -125,25 +125,46 @@ def build_counterparty_data(cp: dict) -> dict:
             if dl_data.get("volume_24h_usd"):
                 data.setdefault("volume_24h_usd", dl_data["volume_24h_usd"])
 
-    # ── 1b. Nansen (on-chain intelligence for exchanges and DeFi) ──
+    # ── 1b. DefiLlama CEX Transparency (exchange reserves — free, no key) ──
+    if entity_type == "exchange":
+        cex_data = defillama_cex.enrich_counterparty(slug)
+        if cex_data.get("available"):
+            data["_sources"].append("defillama_cex")
+            if cex_data.get("onchain_reserve_trend_30d"):
+                data["onchain_reserve_trend_30d"] = cex_data["onchain_reserve_trend_30d"]
+            if cex_data.get("reserve_quality"):
+                data.setdefault("reserve_quality", cex_data["reserve_quality"])
+            data["_cex_reserves"] = {
+                "total_usd":   cex_data.get("total_assets_usd"),
+                "change_30d":  cex_data.get("change_30d_pct"),
+                "quality":     cex_data.get("reserve_quality"),
+                "url":         cex_data.get("dl_url"),
+            }
+
+    # ── 1c. Nansen (fallback for exchanges + DeFi smart money flows) ──
     if entity_type in ("exchange", "custodian", "defi_protocol") and settings.NANSEN_API_KEY:
         nansen_data = nansen.enrich_counterparty(slug, entity_type, display_name)
         if nansen_data.get("available"):
             data["_sources"].append("nansen")
-            # Nansen reserve trend takes priority over DefiLlama for exchanges
-            if nansen_data.get("onchain_reserve_trend_30d"):
+            # Only use Nansen trend if DefiLlama CEX didn't provide one
+            if nansen_data.get("onchain_reserve_trend_30d") and not data.get("onchain_reserve_trend_30d"):
                 data["onchain_reserve_trend_30d"] = nansen_data["onchain_reserve_trend_30d"]
             if nansen_data.get("reserve_quality"):
                 data.setdefault("reserve_quality", nansen_data["reserve_quality"])
-            if nansen_data.get("total_reserves_usd"):
-                data["_nansen"] = {
-                    "total_reserves_usd":  nansen_data.get("total_reserves_usd"),
-                    "btc_reserves_usd":    nansen_data.get("btc_reserves_usd"),
-                    "eth_reserves_usd":    nansen_data.get("eth_reserves_usd"),
-                    "stable_reserves_usd": nansen_data.get("stable_reserves_usd"),
-                    "reserve_quality":     nansen_data.get("reserve_quality"),
-                    "url":                 nansen_data.get("nansen_reserves_url"),
-                }
+
+    # ── 1d. Sanctions Screening (OFAC + EU + UN — all entities) ──────
+    sanctions_result = sanctions.screen_counterparty(
+        display_name,
+        legal_name=cp.get("legal_name"),
+    )
+    data["_sources"].append("sanctions")
+    data["_sanctions"] = sanctions_result
+    if sanctions_result.get("any_match"):
+        # Sanctions match overrides all other regulatory signals
+        data["license_active"]          = False
+        data["enforcement_actions_12m"] = max(data.get("enforcement_actions_12m", 0), 3)
+        data["_sanctions_hit"]          = True
+        print(f"[sanctions] ⚠️ MATCH for {display_name}: {sanctions_result['matched_lists']}")
 
     # ── 2. SEC EDGAR ──────────────────────────────────────────
     edgar_data = edgar.enrich_counterparty(slug)

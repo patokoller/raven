@@ -469,7 +469,7 @@ async def get_data_sources(
     Fetch live data from all providers for a counterparty and return
     what each source contributes. Used for the data sources panel.
     """
-    from app.services.providers import defillama, edgar, fca as fca_provider, zefix as zefix_provider, finma as finma_provider, uid_gleif, nansen as nansen_provider
+    from app.services.providers import defillama, edgar, fca as fca_provider, zefix as zefix_provider, finma as finma_provider, uid_gleif, nansen as nansen_provider, defillama_cex, sanctions as sanctions_provider
 
     cp = (
         supabase.table("counterparties")
@@ -514,6 +514,33 @@ async def get_data_sources(
                      if k not in ("source","available","fetched_at")} if fca_result.get("available") else {},
             "url": f"https://register.fca.org.uk/s/firm?id={fca_result.get('frn','')}",
         }
+
+    # DefiLlama CEX Transparency
+    if cp.get("entity_type") == "exchange":
+        cex_result = defillama_cex.enrich_counterparty(cp.get("slug",""))
+        sources["defillama_cex"] = {
+            "name": "DefiLlama CEX Transparency",
+            "available": cex_result.get("available", False),
+            "data": {k: v for k, v in cex_result.items()
+                     if k not in ("source","available","fetched_at","reserve_trend") and v is not None
+                    } if cex_result.get("available") else {},
+            "url": cex_result.get("dl_url", "https://defillama.com/cexs"),
+        }
+
+    # Sanctions Screening
+    sanctions_result = sanctions_provider.screen_counterparty(
+        cp.get("display_name",""), cp.get("legal_name")
+    )
+    sources["sanctions"] = {
+        "name": "Sanctions Screening (OFAC + EU + UN)",
+        "available": True,
+        "data": {
+            "risk_level":    sanctions_result.get("risk_level"),
+            "matched_lists": sanctions_result.get("matched_lists", []),
+            "screened_at":   sanctions_result.get("screened_at"),
+        },
+        "url": "https://ofac.treasury.gov/sanctions-list-service",
+    }
 
     # Nansen (on-chain intelligence)
     if cp.get("entity_type") in ("exchange", "custodian", "defi_protocol"):
