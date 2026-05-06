@@ -188,3 +188,39 @@ async def get_positions(portfolio_id: str, current_user: CurrentUser = Depends(g
 @router.get("/clients-list")
 async def list_clients(current_user: CurrentUser = Depends(get_current_user)):
     return supabase.table("clients").select("client_id,client_ref,display_name").eq("tenant_id", settings.DEFAULT_TENANT_ID).eq("is_active", True).execute().data
+
+
+@router.delete("/{portfolio_id}")
+async def delete_portfolio(
+    portfolio_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Delete a portfolio and all its positions, metrics, and stress test results."""
+    # Verify it exists and belongs to this tenant
+    p = (
+        supabase.table("portfolios")
+        .select("portfolio_id, portfolio_ref")
+        .eq("portfolio_id", portfolio_id)
+        .eq("tenant_id", settings.DEFAULT_TENANT_ID)
+        .execute()
+        .data
+    )
+    if not p:
+        raise HTTPException(status_code=404, detail="Portfolio not found")
+
+    # Delete child records first (FK constraints)
+    supabase.table("stress_test_results").delete().eq("portfolio_id", portfolio_id).execute()
+    supabase.table("portfolio_metrics").delete().eq("portfolio_id", portfolio_id).execute()
+    supabase.table("portfolio_positions").delete().eq("portfolio_id", portfolio_id).execute()
+    supabase.table("portfolios").delete().eq("portfolio_id", portfolio_id).execute()
+
+    supabase.table("audit_log").insert({
+        "tenant_id":      settings.DEFAULT_TENANT_ID,
+        "event_category": "DATA_CHANGE",
+        "event_type":     "portfolio.deleted",
+        "actor_type":     "USER",
+        "actor_id":       current_user.user_id,
+        "metadata":       {"portfolio_id": portfolio_id, "portfolio_ref": p[0]["portfolio_ref"]},
+    }).execute()
+
+    return {"status": "deleted", "portfolio_id": portfolio_id}

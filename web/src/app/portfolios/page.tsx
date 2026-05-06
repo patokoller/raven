@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
 import { useDropzone } from 'react-dropzone'
-import { Upload, FolderOpen } from 'lucide-react'
+import { Upload, FolderOpen, Trash2 } from 'lucide-react'
 import AppLayout from '@/components/layout/AppLayout'
 import PageHeader from '@/components/layout/PageHeader'
 import Link from 'next/link'
@@ -122,22 +122,51 @@ export default function PortfoliosPage() {
         ) : (
           <div className="grid grid-cols-2 gap-4">
             {portfolios.map((pf: any) => (
-              <Link key={pf.portfolio_id} href={`/portfolios/${pf.portfolio_id}`}>
-                <div className="card p-5 hover:shadow-md transition-shadow cursor-pointer">
-                  <div className="flex items-start justify-between mb-3">
-                    <div>
-                      <div className="font-medium text-sm">{pf.display_name}</div>
-                      <div className="text-xs text-ink-mid mt-0.5">{pf.clients?.display_name ?? '—'}</div>
+              <div key={pf.portfolio_id} className="relative group">
+                <Link href={`/portfolios/${pf.portfolio_id}`}>
+                  <div className="card p-5 hover:shadow-md transition-shadow cursor-pointer">
+                    <div className="flex items-start justify-between mb-3">
+                      <div>
+                        <div className="font-medium text-sm">{pf.display_name}</div>
+                        <div className="text-xs text-ink-mid mt-0.5">{pf.clients?.display_name ?? '—'}</div>
+                      </div>
+                      <span className="font-mono text-[10px] text-ink-mid">{pf.portfolio_ref}</span>
                     </div>
-                    <span className="font-mono text-[10px] text-ink-mid">{pf.portfolio_ref}</span>
+                    <div className="grid grid-cols-3 gap-3 mt-3">
+                      <div><div className="label text-[10px] mb-1">NAV</div><div className="text-sm font-medium">{pf.total_nav_chf ? `CHF ${(pf.total_nav_chf/1e6).toFixed(2)}M` : '—'}</div></div>
+                      <div><div className="label text-[10px] mb-1">Currency</div><div className="text-sm">{pf.base_currency}</div></div>
+                      <div><div className="label text-[10px] mb-1">Uploaded</div><div className="text-xs text-ink-mid">{pf.last_uploaded_at ? new Date(pf.last_uploaded_at).toLocaleDateString('en-CH') : '—'}</div></div>
+                    </div>
                   </div>
-                  <div className="grid grid-cols-3 gap-3 mt-3">
-                    <div><div className="label text-[10px] mb-1">NAV</div><div className="text-sm font-medium">{pf.total_nav_chf ? `CHF ${(pf.total_nav_chf/1e6).toFixed(2)}M` : '—'}</div></div>
-                    <div><div className="label text-[10px] mb-1">Currency</div><div className="text-sm">{pf.base_currency}</div></div>
-                    <div><div className="label text-[10px] mb-1">Uploaded</div><div className="text-xs text-ink-mid">{pf.last_uploaded_at ? new Date(pf.last_uploaded_at).toLocaleDateString('en-CH') : '—'}</div></div>
-                  </div>
-                </div>
-              </Link>
+                </Link>
+                <button
+                  onClick={async e => {
+                    e.preventDefault()
+                    if (!confirm(`Delete "${pf.display_name}"? This cannot be undone.`)) return
+                    setDeleting(pf.portfolio_id)
+                    try {
+                      const r = await fetch(`${API}/api/v1/portfolios/${pf.portfolio_id}`, {
+                        method: 'DELETE',
+                        headers: { Authorization: `Bearer ${localStorage.getItem('raven_token')}` }
+                      })
+                      if (r.ok) {
+                        setPortfolios(prev => prev.filter(p => p.portfolio_id !== pf.portfolio_id))
+                        toast.success(`"${pf.display_name}" deleted`)
+                      } else {
+                        toast.error('Delete failed')
+                      }
+                    } catch { toast.error('Delete failed') }
+                    finally { setDeleting(null) }
+                  }}
+                  disabled={deleting === pf.portfolio_id}
+                  className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity
+                    p-1.5 rounded bg-white border border-border text-ink-mid hover:text-red
+                    hover:border-red/30 disabled:opacity-50"
+                  title="Delete portfolio"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
             ))}
           </div>
         )}
