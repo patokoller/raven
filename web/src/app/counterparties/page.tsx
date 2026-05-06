@@ -27,6 +27,7 @@ export default function CounterpartiesPage() {
   const [loading, setLoading] = useState(true)
   const [filter, setFilter]   = useState('')
   const [scoring, setScoring] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
 
   const load = async () => {
     setLoading(true)
@@ -76,8 +77,11 @@ export default function CounterpartiesPage() {
               placeholder="Filter by name or tier…"
               className="border border-border rounded px-3 py-1.5 text-xs focus:outline-none focus:border-ink w-48"
             />
-            <button onClick={load} className="btn-secondary text-xs flex items-center gap-1.5">
-              <RefreshCw className="w-3.5 h-3.5" /> Refresh
+            <button onClick={async () => { setRefreshing(true); await load(); setRefreshing(false) }}
+              disabled={refreshing}
+              className="btn-secondary text-xs flex items-center gap-1.5 disabled:opacity-50">
+              <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+              {refreshing ? 'Refreshing…' : 'Refresh'}
             </button>
             <Link href="/counterparties/new">
               <button className="btn-secondary text-xs flex items-center gap-1.5">

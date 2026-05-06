@@ -51,6 +51,7 @@ export default function DashboardPage() {
   const [alerts, setAlerts] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [scoring, setScoring] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
   const [selectedAlert, setSelectedAlert] = useState<string | null>(null)
 
   const load = async () => {
@@ -96,8 +97,11 @@ export default function DashboardPage() {
         subtitle="Counterparty risk overview"
         action={
           <div className="flex gap-2">
-            <button onClick={load} className="btn-secondary text-xs flex items-center gap-1.5">
-              <RefreshCw className="w-3.5 h-3.5" /> Refresh
+            <button onClick={async () => { setRefreshing(true); await load(); setRefreshing(false) }}
+              disabled={refreshing}
+              className="btn-secondary text-xs flex items-center gap-1.5 disabled:opacity-50">
+              <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+              {refreshing ? 'Refreshing…' : 'Refresh'}
             </button>
             <button onClick={runScoring} disabled={scoring} className="btn-primary text-xs flex items-center gap-1.5 py-1.5">
               <Activity className="w-3 h-3" /> {scoring ? 'Running…' : 'Run Scoring'}
