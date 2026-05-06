@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import { TrendingDown, TrendingUp, Minus, RefreshCw, Activity, AlertTriangle } from 'lucide-react'
 import AppLayout from '@/components/layout/AppLayout'
 import PageHeader from '@/components/layout/PageHeader'
@@ -96,6 +96,9 @@ export default function DashboardPage() {
         subtitle="Counterparty risk overview"
         action={
           <div className="flex gap-2">
+            <button onClick={load} className="btn-secondary text-xs flex items-center gap-1.5">
+              <RefreshCw className="w-3.5 h-3.5" /> Refresh
+            </button>
             <button onClick={load} className="btn-secondary text-xs flex items-center gap-1.5 py-1.5">
               <RefreshCw className="w-3 h-3" /> Refresh
             </button>
