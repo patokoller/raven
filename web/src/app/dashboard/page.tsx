@@ -99,9 +99,6 @@ export default function DashboardPage() {
             <button onClick={load} className="btn-secondary text-xs flex items-center gap-1.5">
               <RefreshCw className="w-3.5 h-3.5" /> Refresh
             </button>
-            <button onClick={load} className="btn-secondary text-xs flex items-center gap-1.5 py-1.5">
-              <RefreshCw className="w-3 h-3" /> Refresh
-            </button>
             <button onClick={runScoring} disabled={scoring} className="btn-primary text-xs flex items-center gap-1.5 py-1.5">
               <Activity className="w-3 h-3" /> {scoring ? 'Running…' : 'Run Scoring'}
             </button>
