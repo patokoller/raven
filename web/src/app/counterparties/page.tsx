@@ -36,7 +36,12 @@ export default function CounterpartiesPage() {
     } catch {} finally { setLoading(false) }
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    load()
+    // Auto-refresh every 30s to pick up new scores from background rescoring
+    const interval = setInterval(load, 30000)
+    return () => clearInterval(interval)
+  }, [])
 
   const runAll = async () => {
     setScoring(true)

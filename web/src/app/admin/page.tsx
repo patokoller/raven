@@ -109,17 +109,18 @@ function ResearchPanel({ onScoresReload }: { onScoresReload: () => Promise<void>
       if (!r.ok) throw new Error(d.detail)
       toast.success(`Applied to ${d.applied} counterparties — rescoring in background`)
       setRescoring(true)
-      // Poll every 20s for 3 attempts then reload
+      // Poll every 30s for up to 6 attempts (3 min total)
+      // score_all_counterparties() takes ~60-90s for 40 entities
       let attempts = 0
       const poll = setInterval(async () => {
         attempts++
         await onScoresReload()
-        if (attempts >= 4) {
+        if (attempts >= 6) {
           clearInterval(poll)
           setRescoring(false)
-          toast.success('Scores updated')
+          toast.success('Rescoring complete — scores updated')
         }
-      }, 20000)
+      }, 30000)
     } catch (e: any) { toast.error(e.message) }
     finally { setApplying(false) }
   }
@@ -417,8 +418,9 @@ export default function AdminPage() {
           <div className="col-span-3 card overflow-hidden">
             <div className="px-5 py-3 border-b border-border flex items-center justify-between">
               <span className="label">Live Score Preview — All {cps.length} Counterparties</span>
-              <span className="text-xs text-ink-mid">
-                {hasChanges ? '⚡ New weights applied' : 'Current scores'}
+              <span className="text-xs text-ink-mid flex items-center gap-1.5">
+                {rescoring && <><RefreshCw className="w-3 h-3 animate-spin text-amber" /> Rescoring in background…</>}
+                {!rescoring && (hasChanges ? '⚡ New weights applied' : 'Current scores')}
               </span>
             </div>
             {loading ? (

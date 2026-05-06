@@ -66,7 +66,11 @@ export default function DashboardPage() {
     finally { setLoading(false) }
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    load()
+    const interval = setInterval(load, 30000)
+    return () => clearInterval(interval)
+  }, [])
 
   const runScoring = async () => {
     setScoring(true)
