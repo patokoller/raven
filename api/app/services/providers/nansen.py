@@ -66,9 +66,6 @@ EXCHANGE_WALLETS = {
             "0x21a31Ee1afC51d94C2eFcCAa2092aD1028285549",  # Binance 15
             "0xF977814e90dA44bFA03b6295A0616a897441aceC",  # Binance 8
         ],
-        "bitcoin": [
-            "bc1qm34lsc65zpw79lxes69zkqmk6ee3ewf0j77s3h",  # Binance cold
-        ]
     },
     "coinbase": {
         "ethereum": [
@@ -80,13 +77,12 @@ EXCHANGE_WALLETS = {
     "kraken": {
         "ethereum": [
             "0x2910543Af39abA0Cd09dBb2D50200b3E800A63D2",  # Kraken 1
-            "0x0A869d79a7052C7f1b55a8EbbbEd5A7a2df786F",   # Kraken 2
+            "0xDA9dfA130Df4dE4673b89022EE50ff26f6EA73CF",  # Kraken 2 (verified)
         ],
     },
     "okx": {
         "ethereum": [
             "0x6cC5F688a315f3dC28A7781717a9A798a59fDA7b",  # OKX 1
-            "0x236F33FbBd2c37000EEF06f4cBf9C8C7eBE9f14",  # OKX 2
         ],
     },
     "bybit": {
@@ -107,6 +103,10 @@ def get_address_balance(address: str, chain: str = "ethereum") -> Optional[dict]
     Get current token balances for a specific wallet address.
     Used to check exchange reserve holdings.
     """
+    # Validate EVM address format before calling API
+    if chain == "ethereum" and (not address.startswith("0x") or len(address) != 42):
+        print(f"[nansen] Skipping invalid address: {address} (must be 42-char hex)")
+        return None
     try:
         r = httpx.post(
             f"{NANSEN_BASE}/profiler/address/current-balance",
