@@ -53,7 +53,7 @@ async def list_counterparties(
         score_ids = [cp["latest_score_id"] for cp in cps if cp.get("latest_score_id")]
         scores = (
             supabase.table("counterparty_scores")
-            .select("score_id, counterparty_id, composite_score, score_delta_7d, score_delta_30d, scored_at")
+            .select("score_id, counterparty_id, composite_score, regulatory_score, financial_score, operational_score, liquidity_score, onchain_score, reputation_score, score_delta_7d, score_delta_30d, scored_at")
             .in_("score_id", score_ids)
             .execute()
             .data
@@ -77,6 +77,7 @@ async def list_counterparties(
             "score_delta_7d": score.get("score_delta_7d"),
             "score_delta_30d": score.get("score_delta_30d"),
             "scored_at": score.get("scored_at"),
+            "latest_score": score if score else None,
         })
 
     return result

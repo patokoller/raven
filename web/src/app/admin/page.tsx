@@ -50,11 +50,18 @@ function previewScore(cp: any, weights: Record<string,number>): number | null {
     onchain:'onchain_score', reputation:'reputation_score',
   }
   let total = 0
+  let weightUsed = 0
   for (const [dim, k] of Object.entries(keys)) {
-    if (s[k] == null) return null
-    total += s[k] * (weights[dim] ?? 0)
+    const w = weights[dim] ?? 0
+    if (s[k] != null) {
+      total += s[k] * w
+      weightUsed += w
+    }
   }
-  return Math.round(total * 10) / 10
+  // Only return null if we have no dimension data at all
+  if (weightUsed === 0) return null
+  // Scale to full weight if some dimensions missing
+  return Math.round((total / weightUsed) * 10) / 10
 }
 
 // ── Research Status Panel ─────────────────────────────────────
@@ -257,22 +264,8 @@ export default function AdminPage() {
 
   const loadCps = async () => {
     try {
-      const cpRes = await fetch(`${API}/api/v1/counterparties`, { headers: H() })
-      if (!cpRes.ok) return
-      const cpData = await cpRes.json()
-      // Fetch full detail in batches of 5 to get dimension score breakdowns
-      const detailed: any[] = []
-      for (let i = 0; i < cpData.length; i += 5) {
-        const batch = cpData.slice(i, i + 5)
-        const results = await Promise.all(
-          batch.map(async (cp: any) => {
-            const r = await fetch(`${API}/api/v1/counterparties/${cp.counterparty_id}`, { headers: H() })
-            return r.ok ? r.json() : cp
-          })
-        )
-        detailed.push(...results)
-      }
-      setCps(detailed)
+      const r = await fetch(`${API}/api/v1/counterparties`, { headers: H() })
+      if (r.ok) setCps(await r.json())
     } catch {}
   }
 
@@ -284,20 +277,7 @@ export default function AdminPage() {
         fetch(`${API}/api/v1/admin/weights`, { headers: H() }),
       ])
       if (cpRes.ok) {
-        const cpData = await cpRes.json()
-        // Batch fetches to get dimension score breakdowns
-        const detailed: any[] = []
-        for (let i = 0; i < cpData.length; i += 5) {
-          const batch = cpData.slice(i, i + 5)
-          const results = await Promise.all(
-            batch.map(async (cp: any) => {
-              const r = await fetch(`${API}/api/v1/counterparties/${cp.counterparty_id}`, { headers: H() })
-              return r.ok ? r.json() : cp
-            })
-          )
-          detailed.push(...results)
-        }
-        setCps(detailed)
+        setCps(await cpRes.json())
       }
       if (wRes.ok) {
         const w = await wRes.json()
