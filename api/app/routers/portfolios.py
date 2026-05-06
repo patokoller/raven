@@ -222,7 +222,7 @@ async def delete_portfolio(
 
     supabase.table("audit_log").insert({
         "tenant_id":      settings.DEFAULT_TENANT_ID,
-        "event_category": "DATA_CHANGE",
+        "event_category": "DATA_WRITE",
         "event_type":     "portfolio.deleted",
         "actor_type":     "USER",
         "actor_id":       current_user.user_id,
