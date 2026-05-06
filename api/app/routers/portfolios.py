@@ -209,10 +209,16 @@ async def delete_portfolio(
         raise HTTPException(status_code=404, detail="Portfolio not found")
 
     # Delete child records first (FK constraints)
-    supabase.table("stress_test_results").delete().eq("portfolio_id", portfolio_id).execute()
-    supabase.table("portfolio_metrics").delete().eq("portfolio_id", portfolio_id).execute()
-    supabase.table("portfolio_positions").delete().eq("portfolio_id", portfolio_id).execute()
-    supabase.table("portfolios").delete().eq("portfolio_id", portfolio_id).execute()
+    for table in ["stress_test_results", "portfolio_metrics", "portfolio_positions"]:
+        try:
+            supabase.table(table).delete().eq("portfolio_id", portfolio_id).execute()
+        except Exception as e:
+            print(f"[portfolio delete] {table}: {e}")
+    try:
+        supabase.table("portfolios").delete().eq("portfolio_id", portfolio_id).execute()
+    except Exception as e:
+        print(f"[portfolio delete] portfolios: {e}")
+        raise HTTPException(status_code=500, detail=f"Delete failed: {str(e)}")
 
     supabase.table("audit_log").insert({
         "tenant_id":      settings.DEFAULT_TENANT_ID,
