@@ -190,6 +190,87 @@ async def list_clients(current_user: CurrentUser = Depends(get_current_user)):
     return supabase.table("clients").select("client_id,client_ref,display_name").eq("tenant_id", settings.DEFAULT_TENANT_ID).eq("is_active", True).execute().data
 
 
+
+@router.get("/{portfolio_id}/risk")
+async def get_portfolio_risk(
+    portfolio_id: str,
+    refresh: bool = False,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Get comprehensive risk analytics for a portfolio. Cached, refresh on demand."""
+    from app.workers.portfolio_risk import compute_portfolio_risk
+
+    if not refresh:
+        # Try cache first
+        cached = (
+            supabase.table("portfolio_risk_cache")
+            .select("*")
+            .eq("portfolio_id", portfolio_id)
+            .execute()
+            .data
+        )
+        if cached:
+            return cached[0]
+
+    # Compute fresh
+    return compute_portfolio_risk(portfolio_id)
+
+
+@router.post("/{portfolio_id}/risk/refresh")
+async def refresh_portfolio_risk(
+    portfolio_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Recompute risk analytics for a portfolio."""
+    from app.workers.portfolio_risk import compute_portfolio_risk
+    from app.workers.tasks import run_in_thread
+    run_in_thread(compute_portfolio_risk, portfolio_id)
+    return {"status": "computing", "portfolio_id": portfolio_id}
+
+
+@router.get("/clients/{client_id}/risk")
+async def get_client_risk(
+    client_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Get aggregated risk across all portfolios for a client."""
+    from app.workers.portfolio_risk import compute_client_risk
+    return compute_client_risk(client_id)
+
+
+@router.get("/clients/{client_id}/limits")
+async def get_client_limits(
+    client_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Get exposure limits for a client mandate."""
+    return (
+        supabase.table("client_limits")
+        .select("*")
+        .eq("client_id", client_id)
+        .eq("is_active", True)
+        .execute()
+        .data
+    ) or []
+
+
+@router.put("/clients/{client_id}/limits")
+async def update_client_limit(
+    client_id: str,
+    body: dict,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Update or create a client exposure limit."""
+    supabase.table("client_limits").upsert({
+        "tenant_id":  settings.DEFAULT_TENANT_ID,
+        "client_id":  client_id,
+        "limit_type": body["limit_type"],
+        "limit_key":  body["limit_key"],
+        "limit_pct":  body["limit_pct"],
+    }, on_conflict="client_id,limit_type,limit_key").execute()
+    return {"status": "updated"}
+
+
 @router.delete("/{portfolio_id}")
 async def delete_portfolio(
     portfolio_id: str,

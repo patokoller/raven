@@ -24,6 +24,7 @@ export default function PortfolioDetailPage() {
   const { id }           = useParams()
   const [portfolio, setPortfolio] = useState<any>(null)
   const [metrics, setMetrics]     = useState<any>(null)
+  const [risk, setRisk]           = useState<any>(null)
   const [positions, setPositions] = useState<any[]>([])
   const [scenarios, setScenarios] = useState<any[]>([])
   const [stressResults, setStressResults] = useState<any[]>([])
@@ -114,7 +115,138 @@ export default function PortfolioDetailPage() {
         </div>
 
         <div className="grid grid-cols-2 gap-6">
-          {/* Positions */}
+          {/* Risk Analytics */}
+      {risk && (
+        <div className="grid grid-cols-2 gap-4">
+          {/* Tier breakdown */}
+          <div className="card p-4">
+            <div className="label mb-3">Risk Tier Breakdown</div>
+            <div className="space-y-2">
+              {Object.entries(risk.risk_tier_breakdown || {}).map(([tier, val]: any) => {
+                const nav = risk.total_nav_chf || 1
+                const pct = (val / nav) * 100
+                const colors: any = { LOW: 'bg-teal', MEDIUM: 'bg-amber', HIGH: 'bg-orange-500', CRITICAL: 'bg-red' }
+                return pct > 0 ? (
+                  <div key={tier}>
+                    <div className="flex justify-between text-xs mb-1">
+                      <span className="text-ink-mid">{tier}</span>
+                      <span className="font-mono">CHF {(val/1e6).toFixed(1)}M ({pct.toFixed(0)}%)</span>
+                    </div>
+                    <div className="h-1.5 bg-surface-2 rounded overflow-hidden">
+                      <div className={`h-full ${colors[tier]}`} style={{ width: `${pct}%` }} />
+                    </div>
+                  </div>
+                ) : null
+              })}
+            </div>
+          </div>
+
+          {/* Jurisdiction */}
+          <div className="card p-4">
+            <div className="label mb-3">Jurisdiction Concentration</div>
+            <div className="space-y-2">
+              {Object.entries(risk.jurisdiction_breakdown || {})
+                .sort((a: any, b: any) => b[1] - a[1])
+                .slice(0, 6)
+                .map(([j, val]: any) => {
+                  const pct = (val / (risk.total_nav_chf || 1)) * 100
+                  return (
+                    <div key={j} className="flex justify-between text-xs">
+                      <span className="text-ink-mid">{j}</span>
+                      <span className="font-mono">{pct.toFixed(0)}%</span>
+                    </div>
+                  )
+                })}
+            </div>
+          </div>
+
+          {/* Concentration warnings */}
+          {risk.concentration_warnings?.length > 0 && (
+            <div className="card p-4">
+              <div className="label mb-3 flex items-center gap-2">
+                Concentration Warnings
+                <span className="text-[10px] font-mono bg-amber/10 text-amber px-1.5 py-0.5 rounded">{risk.concentration_warnings.length}</span>
+              </div>
+              <div className="space-y-2">
+                {risk.concentration_warnings.map((w: any) => (
+                  <div key={w.name} className="flex items-center justify-between p-2 bg-amber/5 border border-amber/20 rounded">
+                    <span className="text-xs font-medium">{w.name}</span>
+                    <span className={`text-xs font-mono ${w.severity === 'CRITICAL' ? 'text-red' : 'text-amber'}`}>{w.pct}%</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Limit breaches */}
+          {risk.limit_breaches?.length > 0 && (
+            <div className="card p-4">
+              <div className="label mb-3 flex items-center gap-2">
+                Limit Breaches
+                <span className="text-[10px] font-mono bg-red/10 text-red px-1.5 py-0.5 rounded">{risk.limit_breaches.length}</span>
+              </div>
+              <div className="space-y-2">
+                {risk.limit_breaches.map((b: any, i: number) => (
+                  <div key={i} className="flex items-center justify-between p-2 bg-red/5 border border-red/20 rounded">
+                    <div>
+                      <div className="text-xs font-medium capitalize">{b.type} {b.key}</div>
+                      <div className="text-[10px] text-ink-mid">Limit: {b.limit_pct}% · Actual: {b.actual_pct}%</div>
+                    </div>
+                    <span className="text-[10px] font-mono text-red bg-red/10 px-1.5 py-0.5 rounded">{b.status}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* FINMA flags */}
+          {risk.finma_flags?.length > 0 && (
+            <div className="card p-4 col-span-2">
+              <div className="label mb-3 text-red flex items-center gap-1.5">
+                ⚠ FINMA Compliance Issues
+              </div>
+              <div className="space-y-2">
+                {risk.finma_flags.map((f: any) => (
+                  <div key={f.name} className="p-2.5 bg-red/5 border border-red/20 rounded">
+                    <div className="flex justify-between mb-0.5">
+                      <span className="text-xs font-medium">{f.name}</span>
+                      <span className="text-xs font-mono text-ink-mid">{f.pct}% of portfolio</span>
+                    </div>
+                    <p className="text-xs text-ink-mid">{f.reason}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Correlation groups */}
+          {risk.correlation_groups?.length > 0 && (
+            <div className="card p-4 col-span-2">
+              <div className="label mb-3">Correlation Risk Groups</div>
+              <div className="space-y-3">
+                {risk.correlation_groups.map((g: any) => (
+                  <div key={g.group} className="p-3 bg-amber/5 border border-amber/20 rounded">
+                    <div className="flex justify-between mb-1">
+                      <span className="text-xs font-medium">{g.group}</span>
+                      <span className="text-xs font-mono text-amber">{g.combined_pct}% combined</span>
+                    </div>
+                    <p className="text-[10px] text-ink-mid mb-2">{g.description}</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {g.entities.map((e: any) => (
+                        <span key={e.name} className="text-[10px] font-mono bg-surface-2 px-1.5 py-0.5 rounded">
+                          {e.name} {e.pct}%
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Positions */}
           <div className="card">
             <div className="px-5 py-3 border-b border-border flex items-center justify-between">
               <span className="label">Positions</span>
