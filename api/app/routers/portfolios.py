@@ -209,7 +209,7 @@ async def delete_portfolio(
         raise HTTPException(status_code=404, detail="Portfolio not found")
 
     # Delete child records first (FK constraints)
-    for table in ["stress_test_results", "portfolio_metrics", "portfolio_positions"]:
+    for table in ["stress_test_results", "portfolio_metrics", "portfolio_positions", "reports"]:
         try:
             supabase.table(table).delete().eq("portfolio_id", portfolio_id).execute()
         except Exception as e:
