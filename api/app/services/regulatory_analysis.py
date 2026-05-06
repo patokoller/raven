@@ -360,12 +360,7 @@ def apply_weight_recommendations(doc_id: str, entity_type_filter: Optional[str] 
 def apply_to_affected_counterparties(doc_id: str) -> dict:
     """
     Apply regulatory findings directly to enrichment_data of affected counterparties.
-    
-    For FINMA Guidance 01/2026: sets license_active=False for custodians with
-    SRO-only supervision, and flags them for re-research.
-    
-    This is separate from apply_weight_recommendations() — that changes weights
-    globally. This function changes individual counterparty data.
+    Matches by name against the full registry, updates enrichment and rescores.
     """
     doc = (
         supabase.table("regulatory_documents")
@@ -378,11 +373,27 @@ def apply_to_affected_counterparties(doc_id: str) -> dict:
     if not doc or not doc.get("full_analysis"):
         return {"error": "No analysis found"}
 
-    analysis            = doc["full_analysis"]
-    affected_cps        = analysis.get("affected_counterparties", [])
-    enrichment_fields   = analysis.get("enrichment_fields_to_reverify", [])
-    key_requirements    = analysis.get("key_requirements", [])
-    doc_ref             = doc.get("doc_ref", doc.get("title", "Unknown"))
+    analysis  = doc["full_analysis"]
+    affected_cps = analysis.get("affected_counterparties", [])
+    doc_ref   = doc.get("doc_ref") or doc.get("title", "Unknown")
+
+    print(f"[reg_apply] Starting apply for doc {doc_id}, {len(affected_cps)} affected CPs")
+
+    # Load all counterparties once for matching
+    all_cps = (
+        supabase.table("counterparties")
+        .select("counterparty_id, display_name, enrichment_data, entity_type, slug")
+        .eq("tenant_id", settings.DEFAULT_TENANT_ID)
+        .eq("is_active", True)
+        .execute()
+        .data
+    ) or []
+
+    # Build name lookup map
+    cp_by_name = {}
+    for cp in all_cps:
+        cp_by_name[cp["display_name"].lower()] = cp
+        cp_by_name[cp["slug"].lower()] = cp
 
     updated = []
     skipped = []
@@ -391,77 +402,86 @@ def apply_to_affected_counterparties(doc_id: str) -> dict:
         if not isinstance(affected, dict):
             continue
 
-        name   = affected.get("name", "")
+        name   = affected.get("name", "").strip()
         impact = affected.get("impact", "LOW")
         reason = affected.get("reason", "")
+        if not name:
+            continue
 
-        # Find the counterparty in our registry
-        cp_result = (
-            supabase.table("counterparties")
-            .select("counterparty_id, display_name, enrichment_data, entity_type")
-            .eq("tenant_id", settings.DEFAULT_TENANT_ID)
-            .ilike("display_name", f"%{name.split()[0]}%")  # fuzzy match on first word
-            .execute()
-            .data
-        )
-        if not cp_result:
+        # Find counterparty — exact match first, then partial
+        cp = cp_by_name.get(name.lower())
+        if not cp:
+            # Try partial match on first word
+            first_word = name.lower().split()[0] if name else ""
+            for key, candidate in cp_by_name.items():
+                if first_word and first_word in key:
+                    cp = candidate
+                    break
+
+        if not cp:
             skipped.append(name)
             continue
 
-        cp      = cp_result[0]
         existing = cp.get("enrichment_data") or {}
 
-        # Build regulatory note to add to enrichment
+        # Build regulatory flag entry
         reg_note = {
-            "source":     doc_ref,
+            "doc_ref":    doc_ref,
             "impact":     impact,
             "reason":     reason,
             "applied_at": datetime.utcnow().isoformat(),
         }
 
-        # Apply specific enrichment changes based on impact level
-        updates = {
-            "_regulatory_flags": existing.get("_regulatory_flags", []) + [reg_note]
-        }
+        # Safe list append — handle case where _regulatory_flags isn't a list
+        existing_flags = existing.get("_regulatory_flags", [])
+        if not isinstance(existing_flags, list):
+            existing_flags = []
 
-        # HIGH impact on custodians from FINMA guidance → flag licence
+        updates = {"_regulatory_flags": existing_flags + [reg_note]}
+
+        # HIGH impact custodians from FINMA guidance → flag SRO-only licence issue
         if impact == "HIGH" and cp.get("entity_type") == "custodian":
-            # Don't override manual analyst input, but flag for review
             updates["_finma_compliance_flag"] = reason
-            if "prudential" in reason.lower() or "sro" in reason.lower() or "supervision" in reason.lower():
-                # SRO-only custodians fail FINMA 01/2026 prudential test
+            reason_lower = reason.lower()
+            if any(k in reason_lower for k in ["prudential", "sro", "supervision", "banking licence", "securities"]):
                 updates["license_active"] = False
-                updates["enforcement_actions_12m"] = max(existing.get("enforcement_actions_12m", 0), 1)
+                current_ea = existing.get("enforcement_actions_12m")
+                updates["enforcement_actions_12m"] = max(int(current_ea) if current_ea else 0, 1)
 
         merged = {**existing, **updates}
 
-        supabase.table("counterparties").update({
-            "enrichment_data":  merged,
-            "last_enriched_at": datetime.utcnow().isoformat(),
-        }).eq("counterparty_id", cp["counterparty_id"]).execute()
+        try:
+            supabase.table("counterparties").update({
+                "enrichment_data":  merged,
+                "last_enriched_at": datetime.utcnow().isoformat(),
+            }).eq("counterparty_id", cp["counterparty_id"]).execute()
 
-        # Trigger rescore
-        from app.workers.scoring import score_single_counterparty
-        from app.workers.tasks import run_in_thread
-        run_in_thread(score_single_counterparty, cp["counterparty_id"])
+            # Trigger individual rescore
+            from app.workers.scoring import score_single_counterparty
+            from app.workers.tasks import run_in_thread
+            run_in_thread(score_single_counterparty, cp["counterparty_id"])
 
-        updated.append({
-            "name":    cp["display_name"],
-            "impact":  impact,
-            "changes": list(updates.keys()),
-        })
+            updated.append({"name": cp["display_name"], "impact": impact, "changes": list(updates.keys())})
+            print(f"[reg_apply] Updated {cp['display_name']}: {list(updates.keys())}")
 
-    supabase.table("audit_log").insert({
-        "tenant_id":      settings.DEFAULT_TENANT_ID,
-        "event_category": "HUMAN_REVIEW",
-        "event_type":     "regulatory.applied_to_counterparties",
-        "metadata": {
-            "doc_ref":      doc_ref,
-            "doc_id":       doc_id,
-            "updated":      [u["name"] for u in updated],
-            "skipped":      skipped,
-        },
-    }).execute()
+        except Exception as e:
+            print(f"[reg_apply] Error updating {cp['display_name']}: {e}")
+            skipped.append(name)
+
+    try:
+        supabase.table("audit_log").insert({
+            "tenant_id":      settings.DEFAULT_TENANT_ID,
+            "event_category": "HUMAN_REVIEW",
+            "event_type":     "regulatory.applied_to_counterparties",
+            "metadata": {
+                "doc_ref": doc_ref,
+                "doc_id":  doc_id,
+                "updated": [u["name"] for u in updated],
+                "skipped": skipped,
+            },
+        }).execute()
+    except Exception:
+        pass
 
     return {
         "status":  "applied",

@@ -134,19 +134,13 @@ async def apply_to_counterparties(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """Apply regulatory findings directly to affected counterparty enrichment data."""
-    from app.services.regulatory_analysis import apply_to_affected_counterparties
-    result = apply_to_affected_counterparties(doc_id)
-
-    supabase.table("audit_log").insert({
-        "tenant_id":      settings.DEFAULT_TENANT_ID,
-        "event_category": "HUMAN_REVIEW",
-        "event_type":     "regulatory.counterparties_updated",
-        "actor_type":     "USER",
-        "actor_id":       current_user.user_id,
-        "metadata":       result,
-    }).execute()
-
-    return result
+    try:
+        from app.services.regulatory_analysis import apply_to_affected_counterparties
+        result = apply_to_affected_counterparties(doc_id)
+        return result
+    except Exception as e:
+        print(f"[regulations] apply-counterparties error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/{doc_id}/apply-weights")
