@@ -159,9 +159,8 @@ export default function PortfoliosPage() {
                     finally { setDeleting(null) }
                   }}
                   disabled={deleting === pf.portfolio_id}
-                  className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity
-                    p-1.5 rounded bg-white border border-border text-ink-mid hover:text-red
-                    hover:border-red/30 disabled:opacity-50"
+                  className="absolute top-3 right-3 p-1.5 rounded bg-white border border-border
+                    text-ink-mid hover:text-red hover:border-red/30 disabled:opacity-50 transition-colors"
                   title="Delete portfolio"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
