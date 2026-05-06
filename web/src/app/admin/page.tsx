@@ -100,14 +100,19 @@ function ResearchPanel({ onScoresReload }: { onScoresReload: () => Promise<void>
       const r = await fetch(`${API}/api/v1/admin/research/apply-all`, { method: 'POST', headers: H() })
       const d = await r.json()
       if (!r.ok) throw new Error(d.detail)
-      toast.success(`Applied to ${d.applied} counterparties — rescoring now (~60s)`)
+      toast.success(`Applied to ${d.applied} counterparties — rescoring in background`)
       setRescoring(true)
-      // Reload score table after rescoring completes
-      setTimeout(async () => {
-        await onScoresReload()  // refresh counterparty scores
-        setRescoring(false)
-        toast.success('Scores updated — check the preview table')
-      }, 70000)
+      // Poll every 20s for 3 attempts then reload
+      let attempts = 0
+      const poll = setInterval(async () => {
+        attempts++
+        await onScoresReload()
+        if (attempts >= 4) {
+          clearInterval(poll)
+          setRescoring(false)
+          toast.success('Scores updated')
+        }
+      }, 20000)
     } catch (e: any) { toast.error(e.message) }
     finally { setApplying(false) }
   }
@@ -122,7 +127,8 @@ function ResearchPanel({ onScoresReload }: { onScoresReload: () => Promise<void>
           <span className="font-medium">AI Research — Batch Mode</span>
         </div>
         <div className="flex gap-2">
-          <button onClick={loadStatus} className="btn-secondary text-xs flex items-center gap-1.5 py-1.5">
+          <button onClick={async () => { await loadStatus(); await onScoresReload() }}
+            className="btn-secondary text-xs flex items-center gap-1.5 py-1.5">
             <RefreshCw className="w-3 h-3" /> Refresh
           </button>
           {status?.complete > 0 && (
@@ -252,16 +258,21 @@ export default function AdminPage() {
   const loadCps = async () => {
     try {
       const cpRes = await fetch(`${API}/api/v1/counterparties`, { headers: H() })
-      if (cpRes.ok) {
-        const cpData = await cpRes.json()
-        const detailed = await Promise.all(
-          cpData.map(async (cp: any) => {
+      if (!cpRes.ok) return
+      const cpData = await cpRes.json()
+      // Fetch full detail in batches of 5 to get dimension score breakdowns
+      const detailed: any[] = []
+      for (let i = 0; i < cpData.length; i += 5) {
+        const batch = cpData.slice(i, i + 5)
+        const results = await Promise.all(
+          batch.map(async (cp: any) => {
             const r = await fetch(`${API}/api/v1/counterparties/${cp.counterparty_id}`, { headers: H() })
             return r.ok ? r.json() : cp
           })
         )
-        setCps(detailed)
+        detailed.push(...results)
       }
+      setCps(detailed)
     } catch {}
   }
 
@@ -274,12 +285,18 @@ export default function AdminPage() {
       ])
       if (cpRes.ok) {
         const cpData = await cpRes.json()
-        const detailed = await Promise.all(
-          cpData.map(async (cp: any) => {
-            const r = await fetch(`${API}/api/v1/counterparties/${cp.counterparty_id}`, { headers: H() })
-            return r.ok ? r.json() : cp
-          })
-        )
+        // Batch fetches to get dimension score breakdowns
+        const detailed: any[] = []
+        for (let i = 0; i < cpData.length; i += 5) {
+          const batch = cpData.slice(i, i + 5)
+          const results = await Promise.all(
+            batch.map(async (cp: any) => {
+              const r = await fetch(`${API}/api/v1/counterparties/${cp.counterparty_id}`, { headers: H() })
+              return r.ok ? r.json() : cp
+            })
+          )
+          detailed.push(...results)
+        }
         setCps(detailed)
       }
       if (wRes.ok) {
