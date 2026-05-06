@@ -90,8 +90,9 @@ function DocCard({ doc, onClick }: any) {
 
 function DocModal({ doc: initialDoc, onClose, onUpdated }: any) {
   const [doc, setDoc]           = useState(initialDoc)
-  const [applying, setApplying] = useState(false)
-  const [addUrl, setAddUrl]     = useState('')
+  const [applying, setApplying]     = useState(false)
+  const [applyingCPs, setApplyingCPs] = useState(false)
+  const [addUrl, setAddUrl]           = useState('')
   const analysis = doc.full_analysis
 
   const applyWeights = async () => {
