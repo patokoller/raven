@@ -105,6 +105,7 @@ function stripCitations(text: string): string {
 }
 
 function FindingCard({ dimKey, fieldKey, finding, selected, onToggle, onApplySingle }: any) {
+  const [expanded, setExpanded] = useState(false)
   const hasValue = finding?.value !== null && finding?.value !== undefined
   const conf = finding?.confidence || 'none'
   const confColor = conf === 'high' ? 'text-teal bg-teal/10 border-teal/20'
@@ -149,14 +150,24 @@ function FindingCard({ dimKey, fieldKey, finding, selected, onToggle, onApplySin
             </div>
             <div className="text-sm mb-1.5">{valueDisplay()}</div>
             {finding?.evidence && (
-              <p className="text-xs text-ink-mid leading-relaxed line-clamp-3">
-                {stripCitations(finding.evidence)}
-              </p>
+              <div>
+                <p className={`text-xs text-ink-mid leading-relaxed ${expanded ? '' : 'line-clamp-3'}`}>
+                  {stripCitations(finding.evidence)}
+                </p>
+                {finding.evidence.length > 200 && (
+                  <button
+                    onClick={e => { e.stopPropagation(); setExpanded(!expanded) }}
+                    className="text-[10px] text-gold hover:text-ink mt-1 font-medium"
+                  >
+                    {expanded ? 'Show less ↑' : 'Read more ↓'}
+                  </button>
+                )}
+              </div>
             )}
             {finding?.source && (
               <div className="flex items-center gap-1 mt-1.5">
                 <Globe className="w-3 h-3 text-ink-mid flex-shrink-0" />
-                <span className="text-[10px] text-ink-mid truncate">{stripCitations(finding.source)}</span>
+                <span className="text-[10px] text-ink-mid">{stripCitations(finding.source)}</span>
               </div>
             )}
           </div>
