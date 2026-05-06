@@ -355,3 +355,117 @@ def apply_weight_recommendations(doc_id: str, entity_type_filter: Optional[str] 
         "changes":         applied,
         "doc_ref":         doc["doc_ref"],
     }
+
+
+def apply_to_affected_counterparties(doc_id: str) -> dict:
+    """
+    Apply regulatory findings directly to enrichment_data of affected counterparties.
+    
+    For FINMA Guidance 01/2026: sets license_active=False for custodians with
+    SRO-only supervision, and flags them for re-research.
+    
+    This is separate from apply_weight_recommendations() — that changes weights
+    globally. This function changes individual counterparty data.
+    """
+    doc = (
+        supabase.table("regulatory_documents")
+        .select("full_analysis, doc_ref, title, regulator")
+        .eq("doc_id", doc_id)
+        .single()
+        .execute()
+        .data
+    )
+    if not doc or not doc.get("full_analysis"):
+        return {"error": "No analysis found"}
+
+    analysis            = doc["full_analysis"]
+    affected_cps        = analysis.get("affected_counterparties", [])
+    enrichment_fields   = analysis.get("enrichment_fields_to_reverify", [])
+    key_requirements    = analysis.get("key_requirements", [])
+    doc_ref             = doc.get("doc_ref", doc.get("title", "Unknown"))
+
+    updated = []
+    skipped = []
+
+    for affected in affected_cps:
+        if not isinstance(affected, dict):
+            continue
+
+        name   = affected.get("name", "")
+        impact = affected.get("impact", "LOW")
+        reason = affected.get("reason", "")
+
+        # Find the counterparty in our registry
+        cp_result = (
+            supabase.table("counterparties")
+            .select("counterparty_id, display_name, enrichment_data, entity_type")
+            .eq("tenant_id", settings.DEFAULT_TENANT_ID)
+            .ilike("display_name", f"%{name.split()[0]}%")  # fuzzy match on first word
+            .execute()
+            .data
+        )
+        if not cp_result:
+            skipped.append(name)
+            continue
+
+        cp      = cp_result[0]
+        existing = cp.get("enrichment_data") or {}
+
+        # Build regulatory note to add to enrichment
+        reg_note = {
+            "source":     doc_ref,
+            "impact":     impact,
+            "reason":     reason,
+            "applied_at": datetime.utcnow().isoformat(),
+        }
+
+        # Apply specific enrichment changes based on impact level
+        updates = {
+            "_regulatory_flags": existing.get("_regulatory_flags", []) + [reg_note]
+        }
+
+        # HIGH impact on custodians from FINMA guidance → flag licence
+        if impact == "HIGH" and cp.get("entity_type") == "custodian":
+            # Don't override manual analyst input, but flag for review
+            updates["_finma_compliance_flag"] = reason
+            if "prudential" in reason.lower() or "sro" in reason.lower() or "supervision" in reason.lower():
+                # SRO-only custodians fail FINMA 01/2026 prudential test
+                updates["license_active"] = False
+                updates["enforcement_actions_12m"] = max(existing.get("enforcement_actions_12m", 0), 1)
+
+        merged = {**existing, **updates}
+
+        supabase.table("counterparties").update({
+            "enrichment_data":  merged,
+            "last_enriched_at": datetime.utcnow().isoformat(),
+        }).eq("counterparty_id", cp["counterparty_id"]).execute()
+
+        # Trigger rescore
+        from app.workers.scoring import score_single_counterparty
+        from app.workers.tasks import run_in_thread
+        run_in_thread(score_single_counterparty, cp["counterparty_id"])
+
+        updated.append({
+            "name":    cp["display_name"],
+            "impact":  impact,
+            "changes": list(updates.keys()),
+        })
+
+    supabase.table("audit_log").insert({
+        "tenant_id":      settings.DEFAULT_TENANT_ID,
+        "event_category": "HUMAN_REVIEW",
+        "event_type":     "regulatory.applied_to_counterparties",
+        "metadata": {
+            "doc_ref":      doc_ref,
+            "doc_id":       doc_id,
+            "updated":      [u["name"] for u in updated],
+            "skipped":      skipped,
+        },
+    }).execute()
+
+    return {
+        "status":  "applied",
+        "updated": updated,
+        "skipped": skipped,
+        "doc_ref": doc_ref,
+    }

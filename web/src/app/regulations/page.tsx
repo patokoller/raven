@@ -237,13 +237,34 @@ function DocModal({ doc: initialDoc, onClose, onUpdated }: any) {
                   </div>
                 ))}
               </div>
-              {doc.status !== 'applied' && (
-                <button onClick={applyWeights} disabled={applying}
-                  className="btn-primary text-xs mt-3 flex items-center gap-1.5 disabled:opacity-50">
-                  <Activity className="w-3 h-3" />
-                  {applying ? 'Applying…' : 'Apply Weight Adjustments & Rescore'}
+              <div className="flex gap-2 mt-3">
+                {doc.status !== 'applied' && (
+                  <button onClick={applyWeights} disabled={applying}
+                    className="btn-primary text-xs flex items-center gap-1.5 disabled:opacity-50">
+                    <Activity className="w-3 h-3" />
+                    {applying ? 'Applying…' : 'Apply Weight Adjustments'}
+                  </button>
+                )}
+                <button
+                  onClick={async () => {
+                    setApplyingCPs(true)
+                    try {
+                      const r = await fetch(`${API}/api/v1/regulations/${doc.doc_id}/apply-counterparties`, {
+                        method: 'POST', headers: H()
+                      })
+                      const d = await r.json()
+                      if (!r.ok) throw new Error(d.detail)
+                      toast.success(`Updated ${d.updated?.length ?? 0} counterparties — rescoring`)
+                      onUpdated()
+                    } catch (e: any) { toast.error(e.message) }
+                    finally { setApplyingCPs(false) }
+                  }}
+                  disabled={applyingCPs}
+                  className="btn-secondary text-xs flex items-center gap-1.5 disabled:opacity-50">
+                  <CheckCircle className="w-3 h-3" />
+                  {applyingCPs ? 'Applying…' : 'Apply to Affected Counterparties'}
                 </button>
-              )}
+              </div>
               {doc.status === 'applied' && (
                 <div className="flex items-center gap-1.5 text-xs text-teal mt-2">
                   <CheckCircle className="w-3.5 h-3.5" /> Weight adjustments already applied

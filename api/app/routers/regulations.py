@@ -128,6 +128,27 @@ async def reanalyse(
     return {"status": "started", "doc_id": doc_id}
 
 
+@router.post("/{doc_id}/apply-counterparties")
+async def apply_to_counterparties(
+    doc_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Apply regulatory findings directly to affected counterparty enrichment data."""
+    from app.services.regulatory_analysis import apply_to_affected_counterparties
+    result = apply_to_affected_counterparties(doc_id)
+
+    supabase.table("audit_log").insert({
+        "tenant_id":      settings.DEFAULT_TENANT_ID,
+        "event_category": "HUMAN_REVIEW",
+        "event_type":     "regulatory.counterparties_updated",
+        "actor_type":     "USER",
+        "actor_id":       current_user.user_id,
+        "metadata":       result,
+    }).execute()
+
+    return result
+
+
 @router.post("/{doc_id}/apply-weights")
 async def apply_weights(
     doc_id: str,
