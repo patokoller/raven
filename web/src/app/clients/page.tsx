@@ -73,7 +73,7 @@ function ClientCard({ client, risk }: any) {
               <div key={pf.portfolio_id} className="flex items-center justify-between text-xs">
                 <span className="text-ink truncate max-w-[200px]">{pf.display_name}</span>
                 <div className="flex items-center gap-2">
-                  {finma === false && <Shield className="w-3 h-3 text-red" title="FINMA non-compliant" />}
+                  {finma === false && <Shield className="w-3 h-3 text-red" aria-label="FINMA non-compliant" />}
                   {pf.risk?.limit_breaches?.length > 0 && (
                     <span className="text-[10px] font-mono text-red">{pf.risk.limit_breaches.length}B</span>
                   )}
