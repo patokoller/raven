@@ -20,17 +20,27 @@ function MetricCard({ label, value, sub, accent }: any) {
   )
 }
 
-function fmtChf(n: number | null | undefined): string {
-  if (n == null) return '-'
-  return 'CHF ' + n.toLocaleString('de-CH', { maximumFractionDigits: 0 })
-}
-function fmtPct(n: number | null | undefined): string {
-  if (n == null) return '-'
-  return (n * 100).toFixed(2) + '%'
-}
-function fmt(n: number | null | undefined, decimals: number = 2, prefix: string = ''): string {
-  if (n == null) return '-'
-  return prefix + n.toFixed(decimals)
+// AI analysis polling - defined at module level to avoid TSX parser issues
+function pollForAiResult(
+  portfolioId: string,
+  setter: (v: any) => void,
+  setRunning: (v: boolean) => void
+) {
+  let remaining = 12
+  const pollId = setInterval(function() {
+    remaining = remaining - 1
+    fetch(API + '/api/v1/portfolios/' + portfolioId + '/ai-analysis', { headers: H() })
+      .then(function(r: any) { return r.json() })
+      .then(function(data: any) {
+        if (data && data.status === 'ready' && data.analysis) {
+          setter(data.analysis)
+          setRunning(false)
+          clearInterval(pollId)
+        }
+      })
+      .catch(function() {})
+    if (!remaining) { clearInterval(pollId); setRunning(false) }
+  }, 5000)
 }
 
 export default function PortfolioDetailPage() {
@@ -44,21 +54,19 @@ export default function PortfolioDetailPage() {
   const [loading, setLoading]     = useState(true)
   const [running, setRunning]     = useState<string | null>(null)
   const [runningAll, setRunningAll] = useState(false)
-  const [aiAnalysis, setAiAnalysis]   = useState<any>(null)
-  const [aiLoading, setAiLoading]     = useState(false)
-  const [aiPolling, setAiPolling]     = useState(false)
+  const [aiResult, setAiResult]       = useState<any>(null)
+  const [aiRunning, setAiRunning]     = useState(false)
 
   const load = async () => {
     setLoading(true)
     try {
-      const [pfRes, mRes, posRes, scRes, srRes, rRes, aiRes] = await Promise.all([
+      const [pfRes, mRes, posRes, scRes, srRes, rRes] = await Promise.all([
         fetch(`${API}/api/v1/portfolios`, { headers: H() }),
         fetch(`${API}/api/v1/portfolios/${id}/metrics`, { headers: H() }),
         fetch(`${API}/api/v1/portfolios/${id}/positions`, { headers: H() }),
         fetch(`${API}/api/v1/stress/scenarios`, { headers: H() }),
         fetch(`${API}/api/v1/stress/results/${id}`, { headers: H() }),
         fetch(`${API}/api/v1/portfolios/${id}/risk`, { headers: H() }),
-        fetch(`${API}/api/v1/portfolios/${id}/ai-analysis`, { headers: H() }),
       ])
       const pfs = pfRes.ok ? await pfRes.json() : []
       setPortfolio(pfs.find((p: any) => p.portfolio_id === id) ?? null)
@@ -67,11 +75,20 @@ export default function PortfolioDetailPage() {
       if (scRes.ok) setScenarios(await scRes.json())
       if (srRes.ok) setStressResults(await srRes.json())
       if (rRes.ok)  setRisk(await rRes.json())
-      if (aiRes.ok) { const a = await aiRes.json(); if (a.status === 'ready') setAiAnalysis(a.analysis) }
+      const aiResp = await fetch(API + '/api/v1/portfolios/' + id + '/ai-analysis', { headers: H() })
+      if (aiResp.ok) { const d = await aiResp.json(); if (d.status === 'ready') setAiResult(d.analysis) }
     } catch {} finally { setLoading(false) }
   }
 
   useEffect(() => { if (id) load() }, [id])
+
+  function startAiAnalysis() {
+    setAiRunning(true)
+    setAiResult(null)
+    fetch(API + '/api/v1/portfolios/' + id + '/ai-analysis', { method: 'POST', headers: H() })
+      .then(function() { pollForAiResult(id as string, setAiResult, setAiRunning) })
+      .catch(function() { setAiRunning(false) })
+  }
 
   const runStress = async (scenario_id: string, name: string) => {
     setRunning(scenario_id)
@@ -117,36 +134,14 @@ export default function PortfolioDetailPage() {
     } catch(e) { toast.error('Failed'); setRunningAll(false) }
   }
 
+  const fmt = (n: number | null | undefined, decimals = 2, prefix = '') =>
+    n != null ? `${prefix}${n.toFixed(decimals)}` : '-'
 
+  const fmtChf = (n: number | null | undefined) =>
+    n != null ? `CHF ${n.toLocaleString('en-CH', { maximumFractionDigits: 0 })}` : '-'
 
-  function runAiAnalysis() {
-    setAiLoading(true)
-    setAiAnalysis(null)
-    fetch(API + '/api/v1/portfolios/' + id + '/ai-analysis', { method: 'POST', headers: H() })
-      .then(function() {
-        let remaining = 12
-        const pollId = setInterval(function() {
-          remaining = remaining - 1
-          fetch(API + '/api/v1/portfolios/' + id + '/ai-analysis', { headers: H() })
-            .then(function(r: any) { return r.json() })
-            .then(function(data: any) {
-              if (data && data.status === 'ready' && data.analysis) {
-                setAiAnalysis(data.analysis)
-                setAiLoading(false)
-                setAiPolling(false)
-                clearInterval(pollId)
-                toast.success('AI analysis complete')
-              }
-            })
-            .catch(function() {})
-          if (!remaining) { clearInterval(pollId); setAiLoading(false); setAiPolling(false) }
-        }, 5000)
-        setAiPolling(true)
-      })
-      .catch(function() { toast.error('Failed to start analysis'); setAiLoading(false) })
-  }
-
-
+  const fmtPct = (n: number | null | undefined) =>
+    n != null ? `${(n * 100).toFixed(2)}%` : '-'
 
   return (
     <AppLayout>
@@ -155,13 +150,10 @@ export default function PortfolioDetailPage() {
         subtitle={`${portfolio?.portfolio_ref ?? ''} - ${portfolio?.clients?.display_name ?? ''}`}
         action={
           <div className="flex gap-2">
-            <button
-              onClick={runAiAnalysis}
-              disabled={aiLoading}
-              className="btn-secondary text-xs flex items-center gap-1.5 disabled:opacity-60"
-            >
-              <Zap className={`w-3.5 h-3.5 ${aiLoading ? 'animate-pulse' : ''}`} />
-              {aiLoading ? 'Analysing...' : aiAnalysis ? 'Re-analyse' : 'AI Analysis'}
+            <button onClick={startAiAnalysis} disabled={aiRunning}
+              className="btn-secondary text-xs flex items-center gap-1.5 disabled:opacity-50">
+              <Zap className={`w-3.5 h-3.5 ${aiRunning ? 'animate-pulse' : ''}`} />
+              {aiRunning ? 'Analysing...' : aiResult ? 'Re-analyse' : 'AI Analysis'}
             </button>
             <Link href={`/reports?portfolio=${id}&client=${portfolio?.client_id}`}>
               <button className="btn-primary text-xs flex items-center gap-1.5">
@@ -202,91 +194,58 @@ export default function PortfolioDetailPage() {
         </div>
 
 
-        {/* AI Risk Analysis Panel */}
-        {(aiLoading || aiAnalysis) && (
+        {(aiRunning || aiResult) && (
           <div className="border border-border rounded-lg overflow-hidden">
             <div className="px-6 py-4 bg-ink flex items-center justify-between">
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2">
                 <Zap className="w-4 h-4 text-gold" />
-                <span className="text-sm font-medium text-white tracking-wide">AI Risk Analysis</span>
-                {aiAnalysis && aiAnalysis.generated_at && (
-                  <span className="text-xs text-white/40 font-mono">
-                    {new Date(aiAnalysis.generated_at).toLocaleString()}
-                  </span>
-                )}
+                <span className="text-sm font-medium text-white">AI Risk Analysis</span>
               </div>
-              {aiAnalysis && aiAnalysis.overall_assessment && (
+              {aiResult && aiResult.overall_assessment && (
                 <span className={`text-xs font-mono px-2.5 py-1 rounded border ${
-                  aiAnalysis.overall_assessment === 'LOW'    ? 'bg-teal/20 text-teal border-teal/30' :
-                  aiAnalysis.overall_assessment === 'MEDIUM' ? 'bg-amber/20 text-amber border-amber/30' :
-                  aiAnalysis.overall_assessment === 'HIGH'   ? 'bg-orange-500/20 text-orange-500 border-orange-500/30' :
+                  aiResult.overall_assessment === 'LOW'    ? 'bg-teal/20 text-teal border-teal/30' :
+                  aiResult.overall_assessment === 'MEDIUM' ? 'bg-amber/20 text-amber border-amber/30' :
                   'bg-red/20 text-red border-red/30'
-                }`}>
-                  {aiAnalysis.overall_assessment} RISK
-                </span>
+                }`}>{aiResult.overall_assessment} RISK</span>
               )}
             </div>
-
-            {aiLoading && !aiAnalysis && (
-              <div className="px-6 py-12 text-center">
-                <Zap className="w-8 h-8 text-ink-mid mx-auto mb-3 animate-pulse" />
-                <div className="text-sm font-medium text-ink mb-1">Analysing portfolio risk...</div>
-                <p className="text-xs text-ink-mid">Claude is reviewing positions, stress tests, regulatory flags and counterparty scores.</p>
-                <p className="text-xs text-ink-mid mt-1">Ready in 15-30 seconds.</p>
+            {aiRunning && !aiResult && (
+              <div className="px-6 py-10 text-center">
+                <Zap className="w-6 h-6 text-ink-mid mx-auto mb-3 animate-pulse" />
+                <p className="text-sm text-ink font-medium">Analysing portfolio...</p>
+                <p className="text-xs text-ink-mid mt-1">Claude is reviewing your positions, stress tests and counterparty scores. Ready in 20-30s.</p>
               </div>
             )}
-
-            {aiAnalysis && (
+            {aiResult && (
               <div className="divide-y divide-border">
                 <div className="px-6 py-5">
-                  <p className="text-sm text-ink leading-relaxed">{aiAnalysis.risk_verdict}</p>
+                  <p className="text-sm text-ink leading-relaxed">{aiResult.risk_verdict}</p>
                 </div>
-
                 <div className="grid grid-cols-2 divide-x divide-border">
                   <div className="px-6 py-5">
                     <div className="text-[10px] font-mono text-ink-mid uppercase tracking-widest mb-3">Key Risk Drivers</div>
                     <div className="space-y-3">
-                      {(aiAnalysis.key_risk_drivers || []).map(function(d: any, i: number) {
+                      {(aiResult.key_risk_drivers || []).map(function(d: any, i: number) {
                         return (
-                          <div key={i} className="flex items-start gap-3">
-                            <div className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 text-[10px] font-bold ${
-                              d.severity === 'HIGH' ? 'bg-red/10 text-red' :
-                              d.severity === 'MEDIUM' ? 'bg-amber/10 text-amber' :
-                              'bg-surface-2 text-ink-mid'
-                            }`}>{i + 1}</div>
+                          <div key={i} className="flex gap-3">
+                            <div className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 text-[10px] font-bold mt-0.5 ${d.severity === 'HIGH' ? 'bg-red/10 text-red' : 'bg-amber/10 text-amber'}`}>{i + 1}</div>
                             <div>
-                              <div className="text-xs font-medium text-ink">{d.driver}</div>
-                              <div className="text-xs text-ink-mid mt-0.5 leading-relaxed">{d.description}</div>
-                              {d.chf_at_risk > 0 && (
-                                <div className="text-[10px] font-mono text-red mt-1">
-                                  CHF {Number(d.chf_at_risk).toLocaleString('de-CH', {maximumFractionDigits: 0})} at risk
-                                </div>
-                              )}
+                              <div className="text-xs font-medium">{d.driver}</div>
+                              <div className="text-xs text-ink-mid mt-0.5">{d.description}</div>
                             </div>
                           </div>
                         )
                       })}
                     </div>
                   </div>
-
                   <div className="px-6 py-5">
                     <div className="text-[10px] font-mono text-ink-mid uppercase tracking-widest mb-3">Action Items</div>
                     <div className="space-y-2">
-                      {(aiAnalysis.action_items || []).map(function(a: any, i: number) {
+                      {(aiResult.action_items || []).map(function(a: any, i: number) {
                         return (
-                          <div key={i} className={`p-3 rounded border-l-2 ${
-                            a.priority === 'IMMEDIATE'  ? 'border-red bg-red/5' :
-                            a.priority === 'SHORT_TERM' ? 'border-amber bg-amber/5' :
-                            'border-border bg-surface-2/30'
-                          }`}>
-                            <div className="flex items-center gap-2 mb-0.5">
-                              <span className={`text-[10px] font-mono ${
-                                a.priority === 'IMMEDIATE'  ? 'text-red' :
-                                a.priority === 'SHORT_TERM' ? 'text-amber' : 'text-ink-mid'
-                              }`}>{a.priority}</span>
-                              <span className="text-[10px] text-ink-mid">{a.deadline}</span>
-                            </div>
-                            <div className="text-xs font-medium text-ink">{a.action}</div>
+                          <div key={i} className={`p-3 rounded border-l-2 ${a.priority === 'IMMEDIATE' ? 'border-red bg-red/5' : a.priority === 'SHORT_TERM' ? 'border-amber bg-amber/5' : 'border-border bg-surface-2/30'}`}>
+                            <div className={`text-[10px] font-mono mb-0.5 ${a.priority === 'IMMEDIATE' ? 'text-red' : a.priority === 'SHORT_TERM' ? 'text-amber' : 'text-ink-mid'}`}>{a.priority} - {a.deadline}</div>
+                            <div className="text-xs font-medium">{a.action}</div>
                             <div className="text-xs text-ink-mid mt-0.5">{a.rationale}</div>
                           </div>
                         )
@@ -294,48 +253,36 @@ export default function PortfolioDetailPage() {
                     </div>
                   </div>
                 </div>
-
-                {(aiAnalysis.rebalancing_suggestions || []).length > 0 && (
+                {(aiResult.rebalancing_suggestions || []).length > 0 && (
                   <div className="px-6 py-5">
-                    <div className="text-[10px] font-mono text-ink-mid uppercase tracking-widest mb-3">Rebalancing Suggestions</div>
+                    <div className="text-[10px] font-mono text-ink-mid uppercase tracking-widest mb-3">Rebalancing</div>
                     <div className="space-y-2">
-                      {aiAnalysis.rebalancing_suggestions.map(function(r: any, i: number) {
+                      {(aiResult.rebalancing_suggestions || []).map(function(r: any, i: number) {
                         return (
-                          <div key={i} className="flex items-start gap-3 p-3 bg-surface-2/50 rounded">
-                            <div className="flex items-center gap-1.5 flex-shrink-0 text-xs">
-                              <span className="font-medium text-ink">{r.from_counterparty}</span>
-                              <ChevronRight className="w-3 h-3 text-ink-mid" />
-                              <span className="font-medium text-teal">{r.to_counterparty}</span>
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <span className="text-xs font-mono text-ink">
-                                CHF {Number(r.amount_chf).toLocaleString('de-CH', {maximumFractionDigits: 0})}
-                              </span>
-                              <span className="text-xs text-ink-mid ml-2">{r.rationale}</span>
-                            </div>
-                            {r.score_impact && (
-                              <span className="text-xs font-mono text-teal flex-shrink-0">{r.score_impact}</span>
-                            )}
+                          <div key={i} className="flex items-center gap-3 p-2.5 bg-surface-2/50 rounded text-xs">
+                            <span className="font-medium">{r.from_counterparty}</span>
+                            <ChevronRight className="w-3 h-3 text-ink-mid" />
+                            <span className="font-medium text-teal">{r.to_counterparty}</span>
+                            <span className="font-mono ml-1">CHF {Number(r.amount_chf).toLocaleString('de-CH', {maximumFractionDigits: 0})}</span>
+                            <span className="text-ink-mid flex-1">{r.rationale}</span>
                           </div>
                         )
                       })}
                     </div>
                   </div>
                 )}
-
-                {aiAnalysis.client_communication && (
+                {aiResult.client_communication && (
                   <div className="px-6 py-5">
                     <div className="text-[10px] font-mono text-ink-mid uppercase tracking-widest mb-3">Client Communication Draft</div>
                     <div className="bg-surface-2/50 rounded p-4 border border-border">
-                      <p className="text-xs text-ink leading-relaxed whitespace-pre-line">{aiAnalysis.client_communication}</p>
+                      <p className="text-xs text-ink leading-relaxed whitespace-pre-line">{aiResult.client_communication}</p>
                     </div>
                   </div>
                 )}
-
-                {aiAnalysis.analyst_notes && (
+                {aiResult.analyst_notes && (
                   <div className="px-6 py-5 bg-surface-2/20">
-                    <div className="text-[10px] font-mono text-ink-mid uppercase tracking-widest mb-2">Analyst Notes (Internal)</div>
-                    <p className="text-xs text-ink-mid leading-relaxed">{aiAnalysis.analyst_notes}</p>
+                    <div className="text-[10px] font-mono text-ink-mid uppercase tracking-widest mb-2">Analyst Notes</div>
+                    <p className="text-xs text-ink-mid leading-relaxed">{aiResult.analyst_notes}</p>
                   </div>
                 )}
               </div>
