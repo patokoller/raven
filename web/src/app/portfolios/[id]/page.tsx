@@ -20,19 +20,6 @@ function MetricCard({ label, value, sub, accent }: any) {
   )
 }
 
-const scoreColor = (s: number) =>
-  s >= 75 ? 'text-teal' : s >= 55 ? 'text-amber' : s >= 35 ? 'text-orange-500' : 'text-red'
-
-const scoreTier = (s: number) =>
-  s >= 75 ? 'LOW' : s >= 55 ? 'MEDIUM' : s >= 35 ? 'HIGH' : 'CRITICAL'
-
-const CAT_LABELS: {[k: string]: string} = {
-  crypto: 'Crypto & Custody',
-  macro:  'Macro & Rates',
-  equity: 'Equity Markets',
-  tail:   'Tail Risk',
-}
-
 function fmtChf(n: number | null | undefined): string {
   return n != null ? 'CHF ' + n.toLocaleString('de-CH', { maximumFractionDigits: 0 }) : '-'
 }
@@ -138,7 +125,7 @@ export default function PortfolioDetailPage() {
               value={risk?.weighted_risk_score != null ? `${risk.weighted_risk_score.toFixed(0)}/100` : '\u2014'}
               sub={
                 risk?.weighted_risk_score != null
-                  ? `${scoreTier(risk.weighted_risk_score)} \u00b7 exposure-weighted`
+                  ? `${risk.weighted_risk_score >= 75 ? 'LOW' : risk.weighted_risk_score >= 55 ? 'MEDIUM' : risk.weighted_risk_score >= 35 ? 'HIGH' : 'CRITICAL'} \u00b7 exposure-weighted`
                   : 'click Recompute Risk'
               }
               accent={risk?.weighted_risk_score != null && risk.weighted_risk_score < 55}
@@ -329,7 +316,7 @@ export default function PortfolioDetailPage() {
                 if (!catScenarios.length) return null
                 return (
                   <div key={cat}>
-                    <div className="text-[10px] font-mono text-ink-mid uppercase tracking-widest mb-2">{CAT_LABELS[cat]}</div>
+                    <div className="text-[10px] font-mono text-ink-mid uppercase tracking-widest mb-2">{cat === 'crypto' ? 'Crypto & Custody' : cat === 'macro' ? 'Macro & Rates' : cat === 'equity' ? 'Equity Markets' : 'Tail Risk'}</div>
                     <div className="space-y-1.5">
                       {catScenarios.map((s: any) => {
                         const result = stressResults.find((r: any) =>
