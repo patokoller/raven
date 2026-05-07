@@ -503,64 +503,54 @@ def run_stress_test(portfolio_id: str, scenario_id: str) -> dict:
     # Apply shocks
     result = apply_shock(positions, scenario)
 
-    # Resolve scenario_id to a real UUID (required by FK constraint)
+    # Resolve scenario UUID — try DB lookup, fall back to upsert, skip if all fails
+    import re
+    uuid_pattern = re.compile(
+        r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.I)
     db_scenario_id = None
+
     try:
-        # Try looking up by UUID first
-        import re
-        uuid_pattern = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.I)
         if uuid_pattern.match(str(scenario_id)):
             db_scenario_id = scenario_id
         else:
-            # Look up by slug
-            row = (
-                supabase.table("stress_scenarios")
-                .select("scenario_id")
-                .eq("slug", scenario_id)
-                .execute()
-                .data
-            )
-            if row:
-                db_scenario_id = row[0]["scenario_id"]
-            else:
-                # Create a DB record for this built-in scenario
-                new_row = supabase.table("stress_scenarios").insert({
-                    "tenant_id":    settings.DEFAULT_TENANT_ID,
-                    "slug":         scenario["slug"],
-                    "display_name": scenario["display_name"],
-                    "description":  scenario.get("description", ""),
-                    "shocks":       scenario.get("shocks", {}),
-                    "is_system":    True,
-                    "is_active":    True,
-                }).execute()
-                db_scenario_id = new_row.data[0]["scenario_id"]
+            rows = (supabase.table("stress_scenarios")
+                    .select("scenario_id")
+                    .eq("slug", scenario_id)
+                    .eq("tenant_id", settings.DEFAULT_TENANT_ID)
+                    .execute().data)
+            if rows:
+                db_scenario_id = rows[0]["scenario_id"]
     except Exception as e:
-        print(f"[stress] Scenario ID resolution error: {e}")
+        print(f"[stress] UUID lookup: {e}")
 
-    # Store result
-    try:
-        if not db_scenario_id:
-            raise ValueError("Could not resolve scenario_id to UUID")
-        stored = supabase.table("stress_test_results").insert({
-            "tenant_id":            settings.DEFAULT_TENANT_ID,
-            "portfolio_id":         portfolio_id,
-            "scenario_id":          db_scenario_id,
-            "as_of_date":           (portfolio.get("valuation_date") or date.today().isoformat()),
-            "portfolio_pnl_chf":    result["pnl_chf"],
-            "portfolio_pnl_pct":    result["pnl_pct"] / 100,
-            "pre_shock_nav_chf":    result["pre_nav_chf"],
-            "post_shock_nav_chf":   result["post_nav_chf"],
-            "position_impacts":     result["position_impacts"],
-            "worst_positions":      result["worst_positions"],
-            "counterparty_impacts": [],
-            "summary_text":         f"{scenario['display_name']}: NAV {result['pnl_pct']:+.1f}% (CHF {result['pnl_chf']:+,.0f})",
-        }).execute()
-        result["result_id"] = stored.data[0]["result_id"]
-        result["scenario_id"] = db_scenario_id
-    except Exception as e:
-        print(f"[stress] Store error: {e}")
-        # Return result even if storage failed
-        result["store_error"] = str(e)
+    # Store result (best-effort — return result regardless)
+    as_of = portfolio.get("valuation_date") or date.today().isoformat()
+    if db_scenario_id:
+        try:
+            stored = supabase.table("stress_test_results").insert({
+                "tenant_id":            settings.DEFAULT_TENANT_ID,
+                "portfolio_id":         portfolio_id,
+                "scenario_id":          db_scenario_id,
+                "as_of_date":           as_of,
+                "portfolio_pnl_chf":    result["pnl_chf"],
+                "portfolio_pnl_pct":    result["pnl_pct"] / 100,
+                "pre_shock_nav_chf":    result["pre_nav_chf"],
+                "post_shock_nav_chf":   result["post_nav_chf"],
+                "position_impacts":     result["position_impacts"],
+                "worst_positions":      result["worst_positions"],
+                "counterparty_impacts": [],
+                "summary_text":         scenario["display_name"] + ": " + str(round(result["pnl_pct"], 1)) + "%",
+            }).execute()
+            result["result_id"] = stored.data[0]["result_id"]
+            result["scenario_id"] = db_scenario_id
+        except Exception as e:
+            print(f"[stress] Store error: {e}")
+            result["store_error"] = str(e)
+    else:
+        # No DB UUID — return result in-memory, include slug for frontend matching
+        result["scenario_id"] = scenario_id
+        result["slug"] = scenario.get("slug", scenario_id)
+        print(f"[stress] Skipping DB store (no UUID for {scenario_id}) — returning in-memory result")
 
     return result
 

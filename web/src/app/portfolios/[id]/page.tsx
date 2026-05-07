@@ -30,6 +30,8 @@ export default function PortfolioDetailPage() {
   const [stressResults, setStressResults] = useState<any[]>([])
   const [loading, setLoading]     = useState(true)
   const [running, setRunning]     = useState<string | null>(null)
+  const [runningAll, setRunningAll] = useState(false)
+  const [runningAll, setRunningAll] = useState(false)
 
   const load = async () => {
     setLoading(true)
@@ -57,17 +59,45 @@ export default function PortfolioDetailPage() {
   const runStress = async (scenario_id: string, name: string) => {
     setRunning(scenario_id)
     try {
-      const r = await fetch(`${API}/api/v1/portfolios/${id}/stress`, {
+      const r = await fetch(API + '/api/v1/portfolios/' + id + '/stress', {
         method: 'POST',
         headers: H(),
         body: JSON.stringify({ scenario_id }),
       })
       if (r.ok) {
-        toast.success(`${name} stress test queued - refresh in 30s`)
-        setTimeout(load, 5000)
+        const result = await r.json()
+        const merged = Object.assign({}, result, {
+          scenario_id: result.scenario_id || result.slug || scenario_id,
+          portfolio_pnl_pct: result.pnl_pct != null ? result.pnl_pct / 100 : null,
+          portfolio_pnl_chf: result.pnl_chf,
+          pre_shock_nav_chf: result.pre_nav_chf,
+          post_shock_nav_chf: result.post_nav_chf,
+        })
+        setStressResults(function(prev: any[]) {
+          const filtered = prev.filter(function(x: any) {
+            return x.scenario_id !== merged.scenario_id && x.scenario_id !== scenario_id
+          })
+          return [merged].concat(filtered)
+        })
+        const pct = result.pnl_pct != null ? result.pnl_pct.toFixed(1) + '%' : 'done'
+        toast.success(name + ': ' + pct)
+      } else {
+        const err = await r.json().catch(function() { return {} })
+        toast.error('Failed: ' + (err.detail || 'server error'))
       }
-    } catch { toast.error('Failed to run stress test') }
+    } catch(e) { toast.error('Connection error') }
     finally { setRunning(null) }
+  }
+
+  const runAllStress = async () => {
+    setRunningAll(true)
+    try {
+      await fetch(API + '/api/v1/portfolios/' + id + '/stress/run-all', {
+        method: 'POST', headers: H(),
+      })
+      toast.success('All 15 scenarios running in background - refresh in 60s')
+      setTimeout(function() { load(); setRunningAll(false) }, 65000)
+    } catch(e) { toast.error('Failed'); setRunningAll(false) }
   }
 
   const fmt = (n: number | null | undefined, decimals = 2, prefix = '') =>

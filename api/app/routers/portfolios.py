@@ -272,6 +272,35 @@ async def update_client_limit(
 
 
 
+
+@router.post("/{portfolio_id}/stress/run-all")
+async def run_all_stress(
+    portfolio_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Run all stress test scenarios for a portfolio."""
+    from app.workers.stress_engine import SCENARIOS, run_stress_test, get_all_scenarios
+    from app.workers.tasks import run_in_thread
+
+    all_scenarios = get_all_scenarios()
+    results = []
+
+    def run_sequentially():
+        for s in all_scenarios:
+            try:
+                result = run_stress_test(portfolio_id, s["scenario_id"])
+                results.append({
+                    "scenario": s["display_name"],
+                    "pnl_pct":  result.get("pnl_pct"),
+                    "pnl_chf":  result.get("pnl_chf"),
+                })
+            except Exception as e:
+                print(f"[stress_all] {s['display_name']}: {e}")
+
+    run_in_thread(run_sequentially)
+    return {"status": "running", "scenario_count": len(all_scenarios),
+            "message": "All scenarios running in background — refresh in 60s"}
+
 @router.post("/{portfolio_id}/stress")
 async def run_stress(
     portfolio_id: str,
