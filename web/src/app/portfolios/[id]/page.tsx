@@ -67,23 +67,21 @@ export default function PortfolioDetailPage() {
   const runStress = async (scenario_id: string, name: string) => {
     setRunning(scenario_id)
     try {
-      const r = await fetch(`${API}/api/v1/portfolios/${id}/stress`, {
+      const r = await fetch(API + '/api/v1/portfolios/' + id + '/stress', {
         method: 'POST',
         headers: H(),
-        body: JSON.stringify({ scenario_id }),
+        body: JSON.stringify({ scenario_id: scenario_id }),
       })
       if (r.ok) {
         const result = await r.json()
-        setStressResults(prev => {
-          const filtered = prev.filter((x: any) => x.scenario_id !== result.scenario_id)
-          return [result, ...filtered]
-        })
-        toast.success(`${name}: ${result.pnl_pct > 0 ? '+' : ''}${result.pnl_pct?.toFixed(1)}%`)
+        load()
+        const sign = result.pnl_pct != null && result.pnl_pct > 0 ? '+' : ''
+        const pct  = result.pnl_pct != null ? result.pnl_pct.toFixed(1) : '?'
+        toast.success(name + ': ' + sign + pct + '%')
       } else {
-        const err = await r.json()
-        toast.error(err.detail || 'Stress test failed')
+        toast.error('Stress test failed')
       }
-    } catch { toast.error('Failed to run stress test') }
+    } catch(e) { toast.error('Failed to run stress test') }
     finally { setRunning(null) }
   }
 
