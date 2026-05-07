@@ -101,11 +101,26 @@ export default function PortfolioDetailPage() {
             <MetricCard label="Max Drawdown 30d" value={fmtPct(metrics?.max_drawdown_30d)} sub="peak-to-trough" accent={(metrics?.max_drawdown_30d ?? 0) < -0.15} />
             <MetricCard label="Sharpe Ratio" value={fmt(metrics?.sharpe_ratio_30d)} sub="30d annualised" />
           </div>
-          <div className="grid grid-cols-4 gap-4 mt-4">
+          <div className="grid grid-cols-5 gap-4 mt-4">
             <MetricCard label="Volatility 30d" value={fmtPct(metrics?.volatility_30d)} sub="annualised" />
             <MetricCard label="Concentration (HHI)" value={fmt(metrics?.hhi, 4)} sub="1.0 = fully concentrated" accent={(metrics?.hhi ?? 0) > 0.25} />
             <MetricCard label="Top Custodian" value={metrics?.top_custodian_name ?? '—'} sub={fmtPct(metrics?.top_custodian_pct) + ' of AuM'} accent={(metrics?.top_custodian_pct ?? 0) > 0.5} />
-            <MetricCard label="Market Risk Score" value={metrics?.risk_score_composite ? `${metrics.risk_score_composite}/100` : '—'} sub={(metrics?.risk_tier ? metrics.risk_tier + " · " : "") + "volatility & concentration"} />
+            <MetricCard
+              label="Market Risk Score"
+              value={metrics?.risk_score_composite ? `${metrics.risk_score_composite}/100` : '—'}
+              sub={metrics?.risk_tier ? `${metrics.risk_tier} · VaR + volatility` : 'VaR + volatility'}
+            />
+            <MetricCard
+              label="Counterparty Risk Score"
+              value={risk?.weighted_risk_score != null ? `${risk.weighted_risk_score.toFixed(0)}/100` : '—'}
+              sub={risk ? (
+                (risk.weighted_risk_score >= 75 ? 'LOW' : risk.weighted_risk_score >= 55 ? 'MEDIUM' : risk.weighted_risk_score >= 35 ? 'HIGH' : 'CRITICAL') +
+                (risk.score_delta_7d && Math.abs(risk.score_delta_7d) >= 0.1
+                  ? ` · ${risk.score_delta_7d > 0 ? '+' : ''}${risk.score_delta_7d.toFixed(1)} (7d)`
+                  : ' · exposure-weighted')
+              ) : 'click Recompute Risk'}
+              accent={risk?.weighted_risk_score != null && risk.weighted_risk_score < 55}
+            />
           </div>
           {!metrics && !loading && (
             <div className="mt-3 text-xs text-ink-mid bg-surface-2 rounded p-3">
@@ -115,36 +130,7 @@ export default function PortfolioDetailPage() {
         </div>
 
         <div className="grid grid-cols-2 gap-6">
-          {/* Risk Score Banner — shows both scores with clear labels */}
-      {(risk || metrics) && (
-        <div className="flex items-stretch gap-4 p-4 bg-surface-2/50 border border-border rounded-lg">
-          {risk?.weighted_risk_score != null && (
-            <div className="flex-1 text-center border-r border-border pr-4">
-              <div className="text-[10px] font-mono text-ink-mid uppercase tracking-widest mb-1">Counterparty Risk Score</div>
-              <div className={`text-4xl font-light tabular-nums ${risk.weighted_risk_score >= 75 ? 'text-teal' : risk.weighted_risk_score >= 55 ? 'text-amber' : risk.weighted_risk_score >= 35 ? 'text-orange-500' : 'text-red'}`}>
-                {risk.weighted_risk_score.toFixed(0)}
-              </div>
-              <div className="text-xs text-ink-mid mt-1">Exposure-weighted · regulatory + financial + operational</div>
-              {risk.score_delta_7d != null && Math.abs(risk.score_delta_7d) >= 0.1 && (
-                <div className={`text-xs font-mono mt-0.5 ${risk.score_delta_7d > 0 ? 'text-teal' : 'text-red'}`}>
-                  {risk.score_delta_7d > 0 ? '↑' : '↓'} {Math.abs(risk.score_delta_7d).toFixed(1)} pts (7d)
-                </div>
-              )}
-            </div>
-          )}
-          {metrics?.risk_score_composite != null && (
-            <div className="flex-1 text-center">
-              <div className="text-[10px] font-mono text-ink-mid uppercase tracking-widest mb-1">Market Risk Score</div>
-              <div className={`text-4xl font-light tabular-nums ${metrics.risk_score_composite >= 75 ? 'text-teal' : metrics.risk_score_composite >= 55 ? 'text-amber' : metrics.risk_score_composite >= 35 ? 'text-orange-500' : 'text-red'}`}>
-                {metrics.risk_score_composite.toFixed(0)}
-              </div>
-              <div className="text-xs text-ink-mid mt-1">VaR + concentration + volatility</div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Counterparty Risk Analytics */}
+          {/* Counterparty Risk Analytics */}
       {risk && (
         <div className="grid grid-cols-2 gap-4">
           {/* Tier breakdown */}
