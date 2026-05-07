@@ -6,6 +6,7 @@ import PageHeader from '@/components/layout/PageHeader'
 import { BarChart2, Zap, FileText } from 'lucide-react'
 import Link from 'next/link'
 import toast from 'react-hot-toast'
+import AiAnalysisPanel, { pollForAiResult } from './AiAnalysisPanel'
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 const H = () => ({ Authorization: `Bearer ${localStorage.getItem('raven_token')}`, 'Content-Type': 'application/json' })
