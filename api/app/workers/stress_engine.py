@@ -465,15 +465,36 @@ def run_stress_test(portfolio_id: str, scenario_id: str) -> dict:
         .data
     )
 
-    # Load scenario — try DB first, then built-in library
-    scenario_row = (
-        supabase.table("stress_scenarios")
-        .select("*")
-        .eq("scenario_id", scenario_id)
-        .single()
-        .execute()
-        .data
-    )
+    # Load scenario — try DB first (only if scenario_id looks like a UUID)
+    import re as _re
+    _uuid_re = _re.compile(
+        r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', _re.I)
+    scenario_row = None
+    if _uuid_re.match(str(scenario_id)):
+        try:
+            scenario_row = (
+                supabase.table("stress_scenarios")
+                .select("*")
+                .eq("scenario_id", scenario_id)
+                .single()
+                .execute()
+                .data
+            )
+        except Exception as _e:
+            print(f"[stress] DB scenario lookup: {_e}")
+    else:
+        # It's a slug — look up by slug column
+        try:
+            rows = (
+                supabase.table("stress_scenarios")
+                .select("*")
+                .eq("slug", scenario_id)
+                .execute()
+                .data
+            )
+            scenario_row = rows[0] if rows else None
+        except Exception as _e:
+            print(f"[stress] Slug lookup: {_e}")
 
     if scenario_row:
         shocks_raw = scenario_row.get("shocks", {})
