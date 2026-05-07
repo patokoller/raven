@@ -309,13 +309,15 @@ async def run_stress(
 ):
     """Run a stress test scenario against a portfolio."""
     from app.workers.stress_engine import run_stress_test
-    from app.workers.tasks import run_in_thread
     scenario_id = body.get("scenario_id")
     if not scenario_id:
         raise HTTPException(status_code=400, detail="scenario_id required")
-    # Run synchronously (fast enough)
-    result = run_stress_test(portfolio_id, scenario_id)
-    return result
+    try:
+        result = run_stress_test(portfolio_id, scenario_id)
+        return result
+    except Exception as e:
+        print(f"[stress] endpoint error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.delete("/{portfolio_id}")
 async def delete_portfolio(
