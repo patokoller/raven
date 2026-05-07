@@ -33,6 +33,16 @@ const CAT_LABELS: {[k: string]: string} = {
   tail:   'Tail Risk',
 }
 
+function fmtChf(n: number | null | undefined): string {
+  return n != null ? 'CHF ' + n.toLocaleString('de-CH', { maximumFractionDigits: 0 }) : '—'
+}
+function fmtPct(n: number | null | undefined): string {
+  return n != null ? (n * 100).toFixed(2) + '%' : '—'
+}
+function fmt(n: number | null | undefined, decimals = 2): string {
+  return n != null ? n.toFixed(decimals) : '—'
+}
+
 export default function PortfolioDetailPage() {
   const { id }           = useParams()
   const [portfolio, setPortfolio] = useState<any>(null)
@@ -89,15 +99,6 @@ export default function PortfolioDetailPage() {
     } catch { toast.error('Failed to run stress test') }
     finally { setRunning(null) }
   }
-
-  const fmtChf = (n: number | null | undefined) =>
-    n != null ? `CHF ${n.toLocaleString('de-CH', { maximumFractionDigits: 0 })}` : '\u2014'
-
-  const fmtPct = (n: number | null | undefined) =>
-    n != null ? `${(n * 100).toFixed(2)}%` : '\u2014'
-
-  const fmt = (n: number | null | undefined, decimals = 2) =>
-    n != null ? n.toFixed(decimals) : '\u2014'
 
   return (
     <AppLayout>
