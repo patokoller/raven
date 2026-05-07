@@ -20,6 +20,19 @@ function MetricCard({ label, value, sub, accent }: any) {
   )
 }
 
+function fmtChf(n: number | null | undefined): string {
+  if (n == null) return '-'
+  return 'CHF ' + n.toLocaleString('de-CH', { maximumFractionDigits: 0 })
+}
+function fmtPct(n: number | null | undefined): string {
+  if (n == null) return '-'
+  return (n * 100).toFixed(2) + '%'
+}
+function fmt(n: number | null | undefined, decimals: number = 2, prefix: string = ''): string {
+  if (n == null) return '-'
+  return prefix + n.toFixed(decimals)
+}
+
 export default function PortfolioDetailPage() {
   const { id }           = useParams()
   const [portfolio, setPortfolio] = useState<any>(null)
@@ -33,7 +46,7 @@ export default function PortfolioDetailPage() {
   const [runningAll, setRunningAll] = useState(false)
   const [aiAnalysis, setAiAnalysis]   = useState<any>(null)
   const [aiLoading, setAiLoading]     = useState(false)
-  const [aiPolling, setAiPolling]     = useState(false) // eslint-disable-line
+  const [aiPolling, setAiPolling]     = useState(false)
 
   const load = async () => {
     setLoading(true)
@@ -104,8 +117,6 @@ export default function PortfolioDetailPage() {
     } catch(e) { toast.error('Failed'); setRunningAll(false) }
   }
 
-  const fmt = (n: number | null | undefined, decimals = 2, prefix = '') =>
-    n != null ? `${prefix}${n.toFixed(decimals)}` : '-'
 
 
   const runAiAnalysis = async () => {
@@ -141,11 +152,7 @@ export default function PortfolioDetailPage() {
     }
   }
 
-  const fmtChf = (n: number | null | undefined) =>
-    n != null ? `CHF ${n.toLocaleString('en-CH', { maximumFractionDigits: 0 })}` : '-'
 
-  const fmtPct = (n: number | null | undefined) =>
-    n != null ? `${(n * 100).toFixed(2)}%` : '-'
 
   return (
     <AppLayout>
