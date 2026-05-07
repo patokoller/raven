@@ -159,7 +159,7 @@ export default function PortfolioDetailPage() {
               disabled={aiLoading}
               className="btn-secondary text-xs flex items-center gap-1.5 disabled:opacity-60"
             >
-              <Sparkles className={`w-3.5 h-3.5 ${aiLoading ? 'animate-pulse' : ''}`} />
+              <Zap className={`w-3.5 h-3.5 ${aiLoading ? 'animate-pulse' : ''}`} />
               {aiLoading ? 'Analysing...' : aiAnalysis ? 'Re-analyse' : 'AI Analysis'}
             </button>
             <Link href={`/reports?portfolio=${id}&client=${portfolio?.client_id}`}>
