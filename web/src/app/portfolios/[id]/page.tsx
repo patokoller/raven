@@ -71,7 +71,7 @@ export default function PortfolioDetailPage() {
   }
 
   const fmt = (n: number | null | undefined, decimals = 2, prefix = '') =>
-    n != null ? `${prefix}${n.toFixed(decimals)}` : '?'
+    n != null ? `${prefix}${n.toFixed(decimals)}` : '-'
 
   const fmtChf = (n: number | null | undefined) =>
     n != null ? `CHF ${n.toLocaleString('en-CH', { maximumFractionDigits: 0 })}` : '-'
@@ -83,7 +83,7 @@ export default function PortfolioDetailPage() {
     <AppLayout>
       <PageHeader
         title={portfolio?.display_name ?? 'Portfolio'}
-        subtitle={`${portfolio?.portfolio_ref ?? ''} ? ${portfolio?.clients?.display_name ?? ''}`}
+        subtitle={`${portfolio?.portfolio_ref ?? ''} - ${portfolio?.clients?.display_name ?? ''}`}
         action={
           <Link href={`/reports?portfolio=${id}&client=${portfolio?.client_id}`}>
             <button className="btn-primary text-xs flex items-center gap-1.5">
@@ -106,8 +106,14 @@ export default function PortfolioDetailPage() {
           <div className="grid grid-cols-5 gap-4 mt-4">
             <MetricCard label="Volatility 30d" value={fmtPct(metrics?.volatility_30d)} sub="annualised" />
             <MetricCard label="Concentration (HHI)" value={fmt(metrics?.hhi, 4)} sub="1.0 = fully concentrated" accent={(metrics?.hhi ?? 0) > 0.25} />
-            <MetricCard label="Top Custodian" value={metrics?.top_custodian_name ?? '?'} sub={fmtPct(metrics?.top_custodian_pct) + ' of AuM'} accent={(metrics?.top_custodian_pct ?? 0) > 0.5} />
-            <MetricCard label="Market Risk Score" value={metrics?.risk_score_composite ? `${metrics.risk_score_composite}/100` : '?'} sub={metrics?.risk_tier ?? 'not computed'} />
+            <MetricCard label="Top Custodian" value={metrics?.top_custodian_name ?? '-'} sub={fmtPct(metrics?.top_custodian_pct) + ' of AuM'} accent={(metrics?.top_custodian_pct ?? 0) > 0.5} />
+            <MetricCard label="Market Risk Score" value={metrics?.risk_score_composite ? metrics.risk_score_composite + '/100' : '-'} sub={(metrics?.risk_tier ?? 'MEDIUM') + ' - VaR + volatility'} />
+            <MetricCard
+              label="Counterparty Risk Score"
+              value={risk != null && risk.weighted_risk_score != null ? risk.weighted_risk_score.toFixed(0) + '/100' : '-'}
+              sub={risk != null && risk.weighted_risk_score != null ? 'exposure-weighted counterparty' : 'click Recompute Risk'}
+              accent={risk != null && risk.weighted_risk_score != null && risk.weighted_risk_score < 55}
+            />
           </div>
           {!metrics && !loading && (
             <div className="mt-3 text-xs text-ink-mid bg-surface-2 rounded p-3">
@@ -136,9 +142,9 @@ export default function PortfolioDetailPage() {
                       <td className="px-4 py-2 font-mono text-xs font-medium">{p.asset_symbol}</td>
                       <td className="px-4 py-2 text-xs text-ink-mid">{p.asset_class}</td>
                       <td className="px-4 py-2 text-xs font-mono">{Number(p.quantity).toLocaleString()}</td>
-                      <td className="px-4 py-2 text-xs">{p.market_value_chf ? `${Number(p.market_value_chf).toLocaleString('en-CH', {maximumFractionDigits:0})}` : '?'}</td>
-                      <td className="px-4 py-2 text-xs">{p.weight_pct ? `${(p.weight_pct*100).toFixed(1)}%` : '?'}</td>
-                      <td className="px-4 py-2 text-xs text-ink-mid">{p.custodian_name ?? '?'}</td>
+                      <td className="px-4 py-2 text-xs">{p.market_value_chf ? Number(p.market_value_chf).toLocaleString('de-CH', {maximumFractionDigits:0}) : '-'}</td>
+                      <td className="px-4 py-2 text-xs">{p.weight_pct ? `${(p.weight_pct*100).toFixed(1)}%` : '-'}</td>
+                      <td className="px-4 py-2 text-xs text-ink-mid">{p.custodian_name ?? '-'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -160,7 +166,7 @@ export default function PortfolioDetailPage() {
                       <div className="text-sm font-medium">{s.display_name}</div>
                       {result && (
                         <div className={`text-xs mt-0.5 font-mono ${(result.portfolio_pnl_pct ?? 0) < -0.2 ? 'text-red' : 'text-ink-mid'}`}>
-                          {result.portfolio_pnl_pct != null ? `${(result.portfolio_pnl_pct*100).toFixed(1)}% ? ${fmtChf(result.portfolio_pnl_chf)}` : ''}
+                          {result.portfolio_pnl_pct != null ? `${(result.portfolio_pnl_pct*100).toFixed(1)}% - ${fmtChf(result.portfolio_pnl_chf)}` : ''}
                         </div>
                       )}
                     </div>
@@ -170,7 +176,7 @@ export default function PortfolioDetailPage() {
                       className="btn-secondary text-xs flex items-center gap-1 py-1 disabled:opacity-50"
                     >
                       <Zap className="w-3 h-3" />
-                      {running === s.scenario_id ? 'Running?' : result ? 'Re-run' : 'Run'}
+                      {running === s.scenario_id ? 'Running...' : result ? 'Re-run' : 'Run'}
                     </button>
                   </div>
                 )
