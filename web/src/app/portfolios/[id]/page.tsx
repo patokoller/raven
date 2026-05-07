@@ -31,7 +31,6 @@ export default function PortfolioDetailPage() {
   const [loading, setLoading]     = useState(true)
   const [running, setRunning]     = useState<string | null>(null)
   const [runningAll, setRunningAll] = useState(false)
-  const [runningAll, setRunningAll] = useState(false)
 
   const load = async () => {
     setLoading(true)
