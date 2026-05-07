@@ -31,17 +31,21 @@ export default function PortfolioDetailPage() {
   const [loading, setLoading]     = useState(true)
   const [running, setRunning]     = useState<string | null>(null)
   const [runningAll, setRunningAll] = useState(false)
+  const [aiAnalysis, setAiAnalysis]   = useState<any>(null)
+  const [aiLoading, setAiLoading]     = useState(false)
+  const [aiPolling, setAiPolling]     = useState(false)
 
   const load = async () => {
     setLoading(true)
     try {
-      const [pfRes, mRes, posRes, scRes, srRes, rRes] = await Promise.all([
+      const [pfRes, mRes, posRes, scRes, srRes, rRes, aiRes] = await Promise.all([
         fetch(`${API}/api/v1/portfolios`, { headers: H() }),
         fetch(`${API}/api/v1/portfolios/${id}/metrics`, { headers: H() }),
         fetch(`${API}/api/v1/portfolios/${id}/positions`, { headers: H() }),
         fetch(`${API}/api/v1/stress/scenarios`, { headers: H() }),
         fetch(`${API}/api/v1/stress/results/${id}`, { headers: H() }),
         fetch(`${API}/api/v1/portfolios/${id}/risk`, { headers: H() }),
+        fetch(`${API}/api/v1/portfolios/${id}/ai-analysis`, { headers: H() }),
       ])
       const pfs = pfRes.ok ? await pfRes.json() : []
       setPortfolio(pfs.find((p: any) => p.portfolio_id === id) ?? null)
@@ -50,6 +54,7 @@ export default function PortfolioDetailPage() {
       if (scRes.ok) setScenarios(await scRes.json())
       if (srRes.ok) setStressResults(await srRes.json())
       if (rRes.ok)  setRisk(await rRes.json())
+      if (aiRes.ok) { const a = await aiRes.json(); if (a.status === 'ready') setAiAnalysis(a.analysis) }
     } catch {} finally { setLoading(false) }
   }
 
@@ -102,6 +107,40 @@ export default function PortfolioDetailPage() {
   const fmt = (n: number | null | undefined, decimals = 2, prefix = '') =>
     n != null ? `${prefix}${n.toFixed(decimals)}` : '-'
 
+
+  const runAiAnalysis = async () => {
+    setAiLoading(true)
+    setAiAnalysis(null)
+    try {
+      await fetch(API + '/api/v1/portfolios/' + id + '/ai-analysis', {
+        method: 'POST', headers: H(),
+      })
+      // Poll for result
+      setAiPolling(true)
+      let attempts = 0
+      const poll = setInterval(async function() {
+        attempts++
+        try {
+          const r = await fetch(API + '/api/v1/portfolios/' + id + '/ai-analysis', { headers: H() })
+          if (r.ok) {
+            const data = await r.json()
+            if (data.status === 'ready' && data.analysis) {
+              setAiAnalysis(data.analysis)
+              setAiLoading(false)
+              setAiPolling(false)
+              clearInterval(poll)
+              toast.success('AI analysis complete')
+            }
+          }
+        } catch(e) {}
+        if (attempts > 12) { clearInterval(poll); setAiLoading(false); setAiPolling(false) }
+      }, 5000)
+    } catch(e) {
+      toast.error('Failed to start analysis')
+      setAiLoading(false)
+    }
+  }
+
   const fmtChf = (n: number | null | undefined) =>
     n != null ? `CHF ${n.toLocaleString('en-CH', { maximumFractionDigits: 0 })}` : '-'
 
@@ -114,11 +153,21 @@ export default function PortfolioDetailPage() {
         title={portfolio?.display_name ?? 'Portfolio'}
         subtitle={`${portfolio?.portfolio_ref ?? ''} - ${portfolio?.clients?.display_name ?? ''}`}
         action={
-          <Link href={`/reports?portfolio=${id}&client=${portfolio?.client_id}`}>
-            <button className="btn-primary text-xs flex items-center gap-1.5">
-              <FileText className="w-3.5 h-3.5" /> Generate Report
+          <div className="flex gap-2">
+            <button
+              onClick={runAiAnalysis}
+              disabled={aiLoading}
+              className="btn-secondary text-xs flex items-center gap-1.5 disabled:opacity-60"
+            >
+              <Brain className={`w-3.5 h-3.5 ${aiLoading ? 'animate-pulse' : ''}`} />
+              {aiLoading ? 'Analysing...' : aiAnalysis ? 'Re-analyse' : 'AI Analysis'}
             </button>
-          </Link>
+            <Link href={`/reports?portfolio=${id}&client=${portfolio?.client_id}`}>
+              <button className="btn-primary text-xs flex items-center gap-1.5">
+                <FileText className="w-3.5 h-3.5" /> Generate Report
+              </button>
+            </Link>
+          </div>
         }
       />
 

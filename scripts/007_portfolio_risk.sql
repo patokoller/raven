@@ -68,3 +68,8 @@ FROM clients c
 ON CONFLICT DO NOTHING;
 
 SELECT 'portfolio risk management tables created' as status;
+
+-- AI analysis columns on portfolio_risk_cache (run if not already added)
+ALTER TABLE portfolio_risk_cache
+  ADD COLUMN IF NOT EXISTS ai_analysis    JSONB,
+  ADD COLUMN IF NOT EXISTS ai_analysed_at TIMESTAMPTZ;

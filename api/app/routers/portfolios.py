@@ -273,6 +273,41 @@ async def update_client_limit(
 
 
 
+
+@router.post("/{portfolio_id}/ai-analysis")
+async def run_ai_analysis(
+    portfolio_id: str,
+    background_tasks: BackgroundTasks,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Trigger AI risk analysis for a portfolio (runs in background)."""
+    from app.workers.portfolio_ai_analysis import analyse_portfolio_risk
+    background_tasks.add_task(analyse_portfolio_risk, portfolio_id)
+    return {"status": "running", "portfolio_id": portfolio_id,
+            "message": "AI analysis running — results ready in 15-30 seconds"}
+
+
+@router.get("/{portfolio_id}/ai-analysis")
+async def get_ai_analysis(
+    portfolio_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Get the latest AI analysis for a portfolio."""
+    row = (
+        supabase.table("portfolio_risk_cache")
+        .select("ai_analysis, ai_analysed_at")
+        .eq("portfolio_id", portfolio_id)
+        .execute()
+        .data
+    )
+    if not row or not row[0].get("ai_analysis"):
+        return {"status": "not_run"}
+    return {
+        "status": "ready",
+        "analysis": row[0]["ai_analysis"],
+        "generated_at": row[0].get("ai_analysed_at"),
+    }
+
 @router.post("/{portfolio_id}/stress/run-all")
 async def run_all_stress(
     portfolio_id: str,
