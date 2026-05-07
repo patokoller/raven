@@ -126,11 +126,11 @@ export default function PortfolioDetailPage() {
       await fetch(API + '/api/v1/portfolios/' + id + '/ai-analysis', {
         method: 'POST', headers: H(),
       })
-      // Poll for result
+      // Poll for result every 5s, up to 12 times (60s total)
       setAiPolling(true)
-      let attempts = 0
+      let remaining = 12
       const poll = setInterval(async function() {
-        attempts++
+        remaining = remaining - 1
         try {
           const r = await fetch(API + '/api/v1/portfolios/' + id + '/ai-analysis', { headers: H() })
           if (r.ok) {
@@ -141,10 +141,11 @@ export default function PortfolioDetailPage() {
               setAiPolling(false)
               clearInterval(poll)
               toast.success('AI analysis complete')
+              return
             }
           }
         } catch(e) {}
-        if (attempts > 12) { clearInterval(poll); setAiLoading(false); setAiPolling(false) }
+        if (!remaining) { clearInterval(poll); setAiLoading(false); setAiPolling(false) }
       }, 5000)
     } catch(e) {
       toast.error('Failed to start analysis')
