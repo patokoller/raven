@@ -96,9 +96,6 @@ export default function PortfolioDetailPage() {
     crypto: 'Crypto & Custody', macro: 'Macro & Rates',
     equity: 'Equity Markets',   tail:  'Tail Risk',
   }
-  const catIcons: Record<string, string> = {
-    crypto: '\u26d3', macro: '\ud83d\udcca', equity: '\ud83d\udcc8', tail: '\u26a0',
-  }
 
   return (
     <AppLayout>
@@ -329,9 +326,7 @@ export default function PortfolioDetailPage() {
                 if (!catScenarios.length) return null
                 return (
                   <div key={cat}>
-                    <div className="flex items-center gap-1.5 mb-2">
-                      <span className="text-[10px] font-mono text-ink-mid uppercase tracking-widest">{catLabels[cat]}</span>
-                    </div>
+                    <div className="text-[10px] font-mono text-ink-mid uppercase tracking-widest mb-2">{catLabels[cat]}</div>
                     <div className="space-y-1.5">
                       {catScenarios.map((s: any) => {
                         const result = stressResults.find((r: any) =>
