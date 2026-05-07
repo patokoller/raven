@@ -34,13 +34,13 @@ const CAT_LABELS: {[k: string]: string} = {
 }
 
 function fmtChf(n: number | null | undefined): string {
-  return n != null ? 'CHF ' + n.toLocaleString('de-CH', { maximumFractionDigits: 0 }) : '—'
+  return n != null ? 'CHF ' + n.toLocaleString('de-CH', { maximumFractionDigits: 0 }) : '-'
 }
 function fmtPct(n: number | null | undefined): string {
-  return n != null ? (n * 100).toFixed(2) + '%' : '—'
+  return n != null ? (n * 100).toFixed(2) + '%' : '-'
 }
 function fmt(n: number | null | undefined, decimals = 2): string {
-  return n != null ? n.toFixed(decimals) : '—'
+  return n != null ? n.toFixed(decimals) : '-'
 }
 
 export default function PortfolioDetailPage() {
