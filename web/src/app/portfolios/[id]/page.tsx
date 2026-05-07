@@ -261,115 +261,137 @@ export default function PortfolioDetailPage() {
         </div>
       )}
 
-      {/* Positions */}
-          <div className="card">
-            <div className="px-5 py-3 border-b border-border flex items-center justify-between">
-              <span className="label">Positions</span>
-              <span className="text-xs text-ink-mid">{positions.length} holdings</span>
-            </div>
-            <div className="overflow-auto" style={{ maxHeight: 400 }}>
-              <table className="w-full text-sm">
-                <thead className="sticky top-0 bg-surface-2">
-                  <tr>{['Asset','Class','Quantity','Value CHF','Weight','Custodian'].map(h => (
-                    <th key={h} className="label text-left px-4 py-2 font-normal text-[10px]">{h}</th>
-                  ))}</tr>
-                </thead>
-                <tbody>
-                  {positions.map((p: any) => (
-                    <tr key={p.position_id} className="border-t border-border hover:bg-surface-2/50">
-                      <td className="px-4 py-2 font-mono text-xs font-medium">{p.asset_symbol}</td>
-                      <td className="px-4 py-2 text-xs text-ink-mid">{p.asset_class}</td>
-                      <td className="px-4 py-2 text-xs font-mono">{Number(p.quantity).toLocaleString()}</td>
-                      <td className="px-4 py-2 text-xs">{p.market_value_chf ? `${Number(p.market_value_chf).toLocaleString('en-CH', {maximumFractionDigits:0})}` : '—'}</td>
-                      <td className="px-4 py-2 text-xs">{p.weight_pct ? `${(p.weight_pct*100).toFixed(1)}%` : '—'}</td>
-                      <td className="px-4 py-2 text-xs text-ink-mid">{p.custodian_name ?? '—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+      {/* Main content: positions left, stress tests right */}
+      <div className="grid grid-cols-2 gap-6">
 
-          {/* Stress tests */}
-          <div className="card">
-            <div className="px-5 py-3 border-b border-border">
-              <span className="label">Stress Test Scenarios</span>
-              <p className="text-xs text-ink-mid mt-0.5">15 scenarios across crypto, macro, equity, and tail risk</p>
+        {/* LEFT: Positions table */}
+        <div className="card overflow-hidden">
+          <div className="px-5 py-3 border-b border-border flex items-center justify-between">
+            <span className="label">Positions</span>
+            <span className="text-xs text-ink-mid">{positions.length} holdings</span>
+          </div>
+          <div className="overflow-auto" style={{ maxHeight: 520 }}>
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 bg-surface-2">
+                <tr>{['Asset','Class','Value CHF','Weight','Custodian'].map(h => (
+                  <th key={h} className="label text-left px-4 py-2.5 font-normal text-[10px]">{h}</th>
+                ))}</tr>
+              </thead>
+              <tbody>
+                {positions.map((p: any) => (
+                  <tr key={p.position_id} className="border-t border-border hover:bg-surface-2/30 transition-colors">
+                    <td className="px-4 py-2.5 font-mono text-xs font-semibold">{p.asset_symbol}</td>
+                    <td className="px-4 py-2.5">
+                      <span className="text-[10px] font-mono bg-surface-2 px-1.5 py-0.5 rounded text-ink-mid">{p.asset_class}</span>
+                    </td>
+                    <td className="px-4 py-2.5 text-xs font-mono">
+                      {p.market_value_chf ? Number(p.market_value_chf).toLocaleString('de-CH', {maximumFractionDigits:0}) : '—'}
+                    </td>
+                    <td className="px-4 py-2.5 text-xs text-ink-mid">
+                      {p.weight_pct ? `${(p.weight_pct*100).toFixed(1)}%` : '—'}
+                    </td>
+                    <td className="px-4 py-2.5 text-xs text-ink-mid">{p.custodian_name ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* RIGHT: Stress test scenarios */}
+        <div className="card overflow-hidden flex flex-col">
+          <div className="px-5 py-3 border-b border-border">
+            <div className="flex items-center justify-between">
+              <span className="label">Stress Tests</span>
+              <span className="text-xs text-ink-mid">{stressResults.length} run</span>
             </div>
-            <div className="p-4 space-y-4">
-              {(['crypto', 'macro', 'equity', 'tail'] as const).map(cat => {
-                const catScenarios = scenarios.filter((s: any) => s.category === cat)
-                if (!catScenarios.length) return null
-                const catLabels: Record<string, string> = {
-                  crypto: '⛓ Crypto & Custody',
-                  macro:  '📊 Macro & Rates',
-                  equity: '📈 Equity Markets',
-                  tail:   '⚠ Tail Risk',
-                }
-                return (
-                  <div key={cat}>
-                    <div className="text-[10px] font-mono text-ink-mid uppercase tracking-widest mb-2">{catLabels[cat]}</div>
-                    <div className="space-y-2">
-                      {catScenarios.map((s: any) => {
-                        const result = stressResults.find((r: any) =>
-                          r.scenario_id === s.scenario_id || r.scenario_id === s.slug
-                        )
-                        const pnlPct = result?.portfolio_pnl_pct
-                        const pnlChf = result?.portfolio_pnl_chf
-                        const severity = pnlPct != null
-                          ? pnlPct < -0.30 ? 'text-red' : pnlPct < -0.15 ? 'text-orange-500' : pnlPct < -0.05 ? 'text-amber' : 'text-teal'
-                          : 'text-ink-mid'
-                        return (
-                          <div key={s.scenario_id} className={`flex items-start justify-between p-3 rounded border ${
-                            result ? 'bg-surface-2 border-border' : 'bg-white border-border/60'
-                          }`}>
-                            <div className="flex-1 min-w-0 mr-3">
-                              <div className="text-xs font-medium text-ink">{s.display_name}</div>
-                              {s.description && !result && (
-                                <div className="text-[10px] text-ink-mid mt-0.5 leading-relaxed line-clamp-2">{s.description}</div>
-                              )}
-                              {result && (
-                                <div className="mt-1.5 space-y-1">
-                                  <div className={`text-sm font-mono font-medium ${severity}`}>
-                                    {pnlPct != null ? `${(pnlPct * 100).toFixed(1)}%` : '—'}
-                                    {pnlChf != null && (
-                                      <span className="text-xs ml-2 font-normal">
-                                        {pnlChf >= 0 ? '+' : ''}{pnlChf.toLocaleString('de-CH', { style: 'currency', currency: 'CHF', maximumFractionDigits: 0 })}
+            <p className="text-xs text-ink-mid mt-0.5">15 scenarios · crypto · macro · equity · tail risk</p>
+          </div>
+          <div className="overflow-auto flex-1 p-4 space-y-4" style={{ maxHeight: 520 }}>
+            {(['crypto', 'macro', 'equity', 'tail'] as const).map(cat => {
+              const catScenarios = scenarios.filter((s: any) => s.category === cat)
+              if (!catScenarios.length) return null
+              const catLabels: Record<string, string> = {
+                crypto: 'Crypto & Custody',
+                macro:  'Macro & Rates',
+                equity: 'Equity Markets',
+                tail:   'Tail Risk',
+              }
+              const catIcons: Record<string, string> = {
+                crypto: '⛓', macro: '📊', equity: '📈', tail: '⚠',
+              }
+              return (
+                <div key={cat}>
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <span className="text-[10px]">{catIcons[cat]}</span>
+                    <span className="text-[10px] font-mono text-ink-mid uppercase tracking-widest">{catLabels[cat]}</span>
+                  </div>
+                  <div className="space-y-1.5">
+                    {catScenarios.map((s: any) => {
+                      const result = stressResults.find((r: any) =>
+                        r.scenario_id === s.scenario_id || r.scenario_id === s.slug
+                      )
+                      const pnlPct = result?.portfolio_pnl_pct
+                      const pnlChf = result?.portfolio_pnl_chf
+                      const sevColor = pnlPct != null
+                        ? pnlPct < -0.30 ? 'text-red' : pnlPct < -0.15 ? 'text-orange-500' : pnlPct < -0.05 ? 'text-amber' : 'text-teal'
+                        : ''
+                      return (
+                        <div key={s.scenario_id}
+                          className={`rounded border p-3 ${result ? 'border-border bg-surface-2/50' : 'border-border/50 bg-white'}`}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-medium text-ink">{s.display_name}</span>
+                                {result && pnlPct != null && (
+                                  <span className={`text-xs font-mono font-semibold ${sevColor}`}>
+                                    {(pnlPct * 100).toFixed(1)}%
+                                  </span>
+                                )}
+                              </div>
+                              {result ? (
+                                <div className="mt-1 space-y-0.5">
+                                  <div className={`text-xs font-mono ${sevColor}`}>
+                                    {pnlChf != null && `CHF ${pnlChf.toLocaleString('de-CH', {maximumFractionDigits:0})}`}
+                                    {result.post_shock_nav_chf != null && (
+                                      <span className="text-ink-mid font-normal ml-2">
+                                        → {result.post_shock_nav_chf.toLocaleString('de-CH', {maximumFractionDigits:0})}
                                       </span>
                                     )}
                                   </div>
                                   {result.worst_positions?.length > 0 && (
                                     <div className="text-[10px] text-ink-mid">
-                                      Worst: {result.worst_positions.slice(0,3).map((p: any) => `${p.asset_symbol} ${p.shock_pct?.toFixed(0)}%`).join(' · ')}
-                                    </div>
-                                  )}
-                                  {result.post_nav_chf != null && (
-                                    <div className="text-[10px] text-ink-mid">
-                                      Post-stress NAV: {result.post_nav_chf.toLocaleString('de-CH', { style: 'currency', currency: 'CHF', maximumFractionDigits: 0 })}
+                                      {result.worst_positions.slice(0,3).map((p: any) =>
+                                        `${p.asset_symbol} ${p.shock_pct > 0 ? '+' : ''}${p.shock_pct?.toFixed(0)}%`
+                                      ).join(' · ')}
                                     </div>
                                   )}
                                 </div>
+                              ) : (
+                                <div className="text-[10px] text-ink-mid mt-0.5 line-clamp-1">{s.description}</div>
                               )}
                             </div>
                             <button
                               onClick={() => runStress(s.scenario_id, s.display_name)}
                               disabled={running === s.scenario_id}
-                              className="btn-secondary text-xs flex items-center gap-1 py-1 flex-shrink-0 disabled:opacity-50"
+                              className="btn-secondary text-[10px] py-1 px-2 flex items-center gap-1 flex-shrink-0 disabled:opacity-50"
                             >
                               <Zap className="w-3 h-3" />
-                              {running === s.scenario_id ? 'Running…' : result ? 'Re-run' : 'Run'}
+                              {running === s.scenario_id ? '…' : result ? 'Re-run' : 'Run'}
                             </button>
                           </div>
-                        )
-                      })}
-                    </div>
+                        </div>
+                      )
+                    })}
                   </div>
-                )
-              })}
-            </div>
+                </div>
+              )
+            })}
           </div>
         </div>
       </div>
-    </AppLayout>
+    </div>
+  </AppLayout>
   )
 }
