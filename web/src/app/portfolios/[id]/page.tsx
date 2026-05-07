@@ -20,6 +20,19 @@ function MetricCard({ label, value, sub, accent }: any) {
   )
 }
 
+const scoreColor = (s: number) =>
+  s >= 75 ? 'text-teal' : s >= 55 ? 'text-amber' : s >= 35 ? 'text-orange-500' : 'text-red'
+
+const scoreTier = (s: number) =>
+  s >= 75 ? 'LOW' : s >= 55 ? 'MEDIUM' : s >= 35 ? 'HIGH' : 'CRITICAL'
+
+const CAT_LABELS: {[k: string]: string} = {
+  crypto: 'Crypto & Custody',
+  macro:  'Macro & Rates',
+  equity: 'Equity Markets',
+  tail:   'Tail Risk',
+}
+
 export default function PortfolioDetailPage() {
   const { id }           = useParams()
   const [portfolio, setPortfolio] = useState<any>(null)
@@ -85,17 +98,6 @@ export default function PortfolioDetailPage() {
 
   const fmt = (n: number | null | undefined, decimals = 2) =>
     n != null ? n.toFixed(decimals) : '\u2014'
-
-  const scoreColor = (s: number) =>
-    s >= 75 ? 'text-teal' : s >= 55 ? 'text-amber' : s >= 35 ? 'text-orange-500' : 'text-red'
-
-  const scoreTier = (s: number) =>
-    s >= 75 ? 'LOW' : s >= 55 ? 'MEDIUM' : s >= 35 ? 'HIGH' : 'CRITICAL'
-
-  const catLabels: Record<string, string> = {
-    crypto: 'Crypto & Custody', macro: 'Macro & Rates',
-    equity: 'Equity Markets',   tail:  'Tail Risk',
-  }
 
   return (
     <AppLayout>
@@ -326,7 +328,7 @@ export default function PortfolioDetailPage() {
                 if (!catScenarios.length) return null
                 return (
                   <div key={cat}>
-                    <div className="text-[10px] font-mono text-ink-mid uppercase tracking-widest mb-2">{catLabels[cat]}</div>
+                    <div className="text-[10px] font-mono text-ink-mid uppercase tracking-widest mb-2">{CAT_LABELS[cat]}</div>
                     <div className="space-y-1.5">
                       {catScenarios.map((s: any) => {
                         const result = stressResults.find((r: any) =>
