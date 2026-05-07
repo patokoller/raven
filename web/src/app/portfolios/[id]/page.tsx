@@ -119,38 +119,31 @@ export default function PortfolioDetailPage() {
 
 
 
-  const runAiAnalysis = async () => {
+  function runAiAnalysis() {
     setAiLoading(true)
     setAiAnalysis(null)
-    try {
-      await fetch(API + '/api/v1/portfolios/' + id + '/ai-analysis', {
-        method: 'POST', headers: H(),
+    fetch(API + '/api/v1/portfolios/' + id + '/ai-analysis', { method: 'POST', headers: H() })
+      .then(function() {
+        let remaining = 12
+        const pollId = setInterval(function() {
+          remaining = remaining - 1
+          fetch(API + '/api/v1/portfolios/' + id + '/ai-analysis', { headers: H() })
+            .then(function(r: any) { return r.json() })
+            .then(function(data: any) {
+              if (data && data.status === 'ready' && data.analysis) {
+                setAiAnalysis(data.analysis)
+                setAiLoading(false)
+                setAiPolling(false)
+                clearInterval(pollId)
+                toast.success('AI analysis complete')
+              }
+            })
+            .catch(function() {})
+          if (!remaining) { clearInterval(pollId); setAiLoading(false); setAiPolling(false) }
+        }, 5000)
+        setAiPolling(true)
       })
-      // Poll for result every 5s, up to 12 times (60s total)
-      setAiPolling(true)
-      let remaining = 12
-      const poll = setInterval(async function() {
-        remaining = remaining - 1
-        try {
-          const r = await fetch(API + '/api/v1/portfolios/' + id + '/ai-analysis', { headers: H() })
-          if (r.ok) {
-            const data = await r.json()
-            if (data.status === 'ready' && data.analysis) {
-              setAiAnalysis(data.analysis)
-              setAiLoading(false)
-              setAiPolling(false)
-              clearInterval(poll)
-              toast.success('AI analysis complete')
-              return
-            }
-          }
-        } catch(e) {}
-        if (!remaining) { clearInterval(poll); setAiLoading(false); setAiPolling(false) }
-      }, 5000)
-    } catch(e) {
-      toast.error('Failed to start analysis')
-      setAiLoading(false)
-    }
+      .catch(function() { toast.error('Failed to start analysis'); setAiLoading(false) })
   }
 
 
