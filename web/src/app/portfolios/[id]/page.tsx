@@ -43,6 +43,19 @@ function pollForAiResult(
   }, 5000)
 }
 
+function fmtChf(n: number | null | undefined): string {
+  if (n == null) return '-'
+  return 'CHF ' + n.toLocaleString('de-CH', { maximumFractionDigits: 0 })
+}
+function fmtPct(n: number | null | undefined): string {
+  if (n == null) return '-'
+  return (n * 100).toFixed(2) + '%'
+}
+function fmt(n: number | null | undefined, decimals: number = 2, prefix: string = ''): string {
+  if (n == null) return '-'
+  return prefix + n.toFixed(decimals)
+}
+
 export default function PortfolioDetailPage() {
   const { id }           = useParams()
   const [portfolio, setPortfolio] = useState<any>(null)
@@ -133,15 +146,6 @@ export default function PortfolioDetailPage() {
       setTimeout(function() { load(); setRunningAll(false) }, 65000)
     } catch(e) { toast.error('Failed'); setRunningAll(false) }
   }
-
-  const fmt = (n: number | null | undefined, decimals = 2, prefix = '') =>
-    n != null ? `${prefix}${n.toFixed(decimals)}` : '-'
-
-  const fmtChf = (n: number | null | undefined) =>
-    n != null ? `CHF ${n.toLocaleString('en-CH', { maximumFractionDigits: 0 })}` : '-'
-
-  const fmtPct = (n: number | null | undefined) =>
-    n != null ? `${(n * 100).toFixed(2)}%` : '-'
 
   return (
     <AppLayout>
