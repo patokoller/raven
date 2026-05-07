@@ -33,7 +33,7 @@ export default function PortfolioDetailPage() {
   const [runningAll, setRunningAll] = useState(false)
   const [aiAnalysis, setAiAnalysis]   = useState<any>(null)
   const [aiLoading, setAiLoading]     = useState(false)
-  const [aiPolling, setAiPolling]     = useState(false)
+  const [aiPolling, setAiPolling]     = useState(false) // eslint-disable-line
 
   const load = async () => {
     setLoading(true)
@@ -200,8 +200,150 @@ export default function PortfolioDetailPage() {
           )}
         </div>
 
+
+        {/* AI Risk Analysis Panel */}
+        {(aiLoading || aiAnalysis) && (
+          <div className="border border-border rounded-lg overflow-hidden">
+            <div className="px-6 py-4 bg-ink flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Zap className="w-4 h-4 text-gold" />
+                <span className="text-sm font-medium text-white tracking-wide">AI Risk Analysis</span>
+                {aiAnalysis && aiAnalysis.generated_at && (
+                  <span className="text-xs text-white/40 font-mono">
+                    {new Date(aiAnalysis.generated_at).toLocaleString()}
+                  </span>
+                )}
+              </div>
+              {aiAnalysis && aiAnalysis.overall_assessment && (
+                <span className={`text-xs font-mono px-2.5 py-1 rounded border ${
+                  aiAnalysis.overall_assessment === 'LOW'    ? 'bg-teal/20 text-teal border-teal/30' :
+                  aiAnalysis.overall_assessment === 'MEDIUM' ? 'bg-amber/20 text-amber border-amber/30' :
+                  aiAnalysis.overall_assessment === 'HIGH'   ? 'bg-orange-500/20 text-orange-500 border-orange-500/30' :
+                  'bg-red/20 text-red border-red/30'
+                }`}>
+                  {aiAnalysis.overall_assessment} RISK
+                </span>
+              )}
+            </div>
+
+            {aiLoading && !aiAnalysis && (
+              <div className="px-6 py-12 text-center">
+                <Zap className="w-8 h-8 text-ink-mid mx-auto mb-3 animate-pulse" />
+                <div className="text-sm font-medium text-ink mb-1">Analysing portfolio risk...</div>
+                <p className="text-xs text-ink-mid">Claude is reviewing positions, stress tests, regulatory flags and counterparty scores.</p>
+                <p className="text-xs text-ink-mid mt-1">Ready in 15-30 seconds.</p>
+              </div>
+            )}
+
+            {aiAnalysis && (
+              <div className="divide-y divide-border">
+                <div className="px-6 py-5">
+                  <p className="text-sm text-ink leading-relaxed">{aiAnalysis.risk_verdict}</p>
+                </div>
+
+                <div className="grid grid-cols-2 divide-x divide-border">
+                  <div className="px-6 py-5">
+                    <div className="text-[10px] font-mono text-ink-mid uppercase tracking-widest mb-3">Key Risk Drivers</div>
+                    <div className="space-y-3">
+                      {(aiAnalysis.key_risk_drivers || []).map(function(d: any, i: number) {
+                        return (
+                          <div key={i} className="flex items-start gap-3">
+                            <div className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 text-[10px] font-bold ${
+                              d.severity === 'HIGH' ? 'bg-red/10 text-red' :
+                              d.severity === 'MEDIUM' ? 'bg-amber/10 text-amber' :
+                              'bg-surface-2 text-ink-mid'
+                            }`}>{i + 1}</div>
+                            <div>
+                              <div className="text-xs font-medium text-ink">{d.driver}</div>
+                              <div className="text-xs text-ink-mid mt-0.5 leading-relaxed">{d.description}</div>
+                              {d.chf_at_risk > 0 && (
+                                <div className="text-[10px] font-mono text-red mt-1">
+                                  CHF {Number(d.chf_at_risk).toLocaleString('de-CH', {maximumFractionDigits: 0})} at risk
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="px-6 py-5">
+                    <div className="text-[10px] font-mono text-ink-mid uppercase tracking-widest mb-3">Action Items</div>
+                    <div className="space-y-2">
+                      {(aiAnalysis.action_items || []).map(function(a: any, i: number) {
+                        return (
+                          <div key={i} className={`p-3 rounded border-l-2 ${
+                            a.priority === 'IMMEDIATE'  ? 'border-red bg-red/5' :
+                            a.priority === 'SHORT_TERM' ? 'border-amber bg-amber/5' :
+                            'border-border bg-surface-2/30'
+                          }`}>
+                            <div className="flex items-center gap-2 mb-0.5">
+                              <span className={`text-[10px] font-mono ${
+                                a.priority === 'IMMEDIATE'  ? 'text-red' :
+                                a.priority === 'SHORT_TERM' ? 'text-amber' : 'text-ink-mid'
+                              }`}>{a.priority}</span>
+                              <span className="text-[10px] text-ink-mid">{a.deadline}</span>
+                            </div>
+                            <div className="text-xs font-medium text-ink">{a.action}</div>
+                            <div className="text-xs text-ink-mid mt-0.5">{a.rationale}</div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                {(aiAnalysis.rebalancing_suggestions || []).length > 0 && (
+                  <div className="px-6 py-5">
+                    <div className="text-[10px] font-mono text-ink-mid uppercase tracking-widest mb-3">Rebalancing Suggestions</div>
+                    <div className="space-y-2">
+                      {aiAnalysis.rebalancing_suggestions.map(function(r: any, i: number) {
+                        return (
+                          <div key={i} className="flex items-start gap-3 p-3 bg-surface-2/50 rounded">
+                            <div className="flex items-center gap-1.5 flex-shrink-0 text-xs">
+                              <span className="font-medium text-ink">{r.from_counterparty}</span>
+                              <ChevronRight className="w-3 h-3 text-ink-mid" />
+                              <span className="font-medium text-teal">{r.to_counterparty}</span>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <span className="text-xs font-mono text-ink">
+                                CHF {Number(r.amount_chf).toLocaleString('de-CH', {maximumFractionDigits: 0})}
+                              </span>
+                              <span className="text-xs text-ink-mid ml-2">{r.rationale}</span>
+                            </div>
+                            {r.score_impact && (
+                              <span className="text-xs font-mono text-teal flex-shrink-0">{r.score_impact}</span>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {aiAnalysis.client_communication && (
+                  <div className="px-6 py-5">
+                    <div className="text-[10px] font-mono text-ink-mid uppercase tracking-widest mb-3">Client Communication Draft</div>
+                    <div className="bg-surface-2/50 rounded p-4 border border-border">
+                      <p className="text-xs text-ink leading-relaxed whitespace-pre-line">{aiAnalysis.client_communication}</p>
+                    </div>
+                  </div>
+                )}
+
+                {aiAnalysis.analyst_notes && (
+                  <div className="px-6 py-5 bg-surface-2/20">
+                    <div className="text-[10px] font-mono text-ink-mid uppercase tracking-widest mb-2">Analyst Notes (Internal)</div>
+                    <p className="text-xs text-ink-mid leading-relaxed">{aiAnalysis.analyst_notes}</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="grid grid-cols-2 gap-6">
-          {/* Positions */}
+          {/* Positions */
           <div className="card">
             <div className="px-5 py-3 border-b border-border flex items-center justify-between">
               <span className="label">Positions</span>
