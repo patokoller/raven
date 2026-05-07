@@ -21,11 +21,7 @@ function MetricCard({ label, value, sub, accent }: any) {
 }
 
 // AI analysis polling - defined at module level to avoid TSX parser issues
-function pollForAiResult(
-  portfolioId: string,
-  setter: (v: any) => void,
-  setRunning: (v: boolean) => void
-) {
+function pollForAiResult(portfolioId: string, setter: any, setRunning: any) {
   let remaining = 12
   const pollId = setInterval(function() {
     remaining = remaining - 1
@@ -70,7 +66,7 @@ export default function PortfolioDetailPage() {
   const [aiResult, setAiResult]       = useState<any>(null)
   const [aiRunning, setAiRunning]     = useState(false)
 
-  const load = async () => {
+  async function load() {
     setLoading(true)
     try {
       const [pfRes, mRes, posRes, scRes, srRes, rRes] = await Promise.all([
@@ -103,7 +99,7 @@ export default function PortfolioDetailPage() {
       .catch(function() { setAiRunning(false) })
   }
 
-  const runStress = async (scenario_id: string, name: string) => {
+  async function runStress(scenario_id: string, name: string) {
     setRunning(scenario_id)
     try {
       const r = await fetch(API + '/api/v1/portfolios/' + id + '/stress', {
@@ -136,7 +132,7 @@ export default function PortfolioDetailPage() {
     finally { setRunning(null) }
   }
 
-  const runAllStress = async () => {
+  async function runAllStress() {
     setRunningAll(true)
     try {
       await fetch(API + '/api/v1/portfolios/' + id + '/stress/run-all', {
