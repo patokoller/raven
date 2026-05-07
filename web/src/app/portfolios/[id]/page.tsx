@@ -391,7 +391,9 @@ export default function PortfolioDetailPage() {
           </div>
         </div>
       </div>
-    </div>
+      </div>
+      </div>
+      </div>
   </AppLayout>
   )
 }
