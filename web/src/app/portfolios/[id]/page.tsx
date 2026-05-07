@@ -105,7 +105,7 @@ export default function PortfolioDetailPage() {
             <MetricCard label="Volatility 30d" value={fmtPct(metrics?.volatility_30d)} sub="annualised" />
             <MetricCard label="Concentration (HHI)" value={fmt(metrics?.hhi, 4)} sub="1.0 = fully concentrated" accent={(metrics?.hhi ?? 0) > 0.25} />
             <MetricCard label="Top Custodian" value={metrics?.top_custodian_name ?? '—'} sub={fmtPct(metrics?.top_custodian_pct) + ' of AuM'} accent={(metrics?.top_custodian_pct ?? 0) > 0.5} />
-            <MetricCard label="Risk Score" value={metrics?.risk_score_composite ? `${metrics.risk_score_composite}/100` : '—'} sub={metrics?.risk_tier ?? 'not computed'} />
+            <MetricCard label="Market Risk Score" value={metrics?.risk_score_composite ? `${metrics.risk_score_composite}/100` : '—'} sub={(metrics?.risk_tier ? metrics.risk_tier + " · " : "") + "volatility & concentration"} />
           </div>
           {!metrics && !loading && (
             <div className="mt-3 text-xs text-ink-mid bg-surface-2 rounded p-3">
@@ -115,7 +115,36 @@ export default function PortfolioDetailPage() {
         </div>
 
         <div className="grid grid-cols-2 gap-6">
-          {/* Risk Analytics */}
+          {/* Risk Score Banner — shows both scores with clear labels */}
+      {(risk || metrics) && (
+        <div className="flex items-stretch gap-4 p-4 bg-surface-2/50 border border-border rounded-lg">
+          {risk?.weighted_risk_score != null && (
+            <div className="flex-1 text-center border-r border-border pr-4">
+              <div className="text-[10px] font-mono text-ink-mid uppercase tracking-widest mb-1">Counterparty Risk Score</div>
+              <div className={`text-4xl font-light tabular-nums ${risk.weighted_risk_score >= 75 ? 'text-teal' : risk.weighted_risk_score >= 55 ? 'text-amber' : risk.weighted_risk_score >= 35 ? 'text-orange-500' : 'text-red'}`}>
+                {risk.weighted_risk_score.toFixed(0)}
+              </div>
+              <div className="text-xs text-ink-mid mt-1">Exposure-weighted · regulatory + financial + operational</div>
+              {risk.score_delta_7d != null && Math.abs(risk.score_delta_7d) >= 0.1 && (
+                <div className={`text-xs font-mono mt-0.5 ${risk.score_delta_7d > 0 ? 'text-teal' : 'text-red'}`}>
+                  {risk.score_delta_7d > 0 ? '↑' : '↓'} {Math.abs(risk.score_delta_7d).toFixed(1)} pts (7d)
+                </div>
+              )}
+            </div>
+          )}
+          {metrics?.risk_score_composite != null && (
+            <div className="flex-1 text-center">
+              <div className="text-[10px] font-mono text-ink-mid uppercase tracking-widest mb-1">Market Risk Score</div>
+              <div className={`text-4xl font-light tabular-nums ${metrics.risk_score_composite >= 75 ? 'text-teal' : metrics.risk_score_composite >= 55 ? 'text-amber' : metrics.risk_score_composite >= 35 ? 'text-orange-500' : 'text-red'}`}>
+                {metrics.risk_score_composite.toFixed(0)}
+              </div>
+              <div className="text-xs text-ink-mid mt-1">VaR + concentration + volatility</div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Counterparty Risk Analytics */}
       {risk && (
         <div className="grid grid-cols-2 gap-4">
           {/* Tier breakdown */}
@@ -279,28 +308,75 @@ export default function PortfolioDetailPage() {
           <div className="card">
             <div className="px-5 py-3 border-b border-border">
               <span className="label">Stress Test Scenarios</span>
+              <p className="text-xs text-ink-mid mt-0.5">15 scenarios across crypto, macro, equity, and tail risk</p>
             </div>
-            <div className="p-4 space-y-3">
-              {scenarios.map((s: any) => {
-                const result = stressResults.find((r: any) => r.scenario_id === s.scenario_id)
+            <div className="p-4 space-y-4">
+              {(['crypto', 'macro', 'equity', 'tail'] as const).map(cat => {
+                const catScenarios = scenarios.filter((s: any) => s.category === cat)
+                if (!catScenarios.length) return null
+                const catLabels: Record<string, string> = {
+                  crypto: '⛓ Crypto & Custody',
+                  macro:  '📊 Macro & Rates',
+                  equity: '📈 Equity Markets',
+                  tail:   '⚠ Tail Risk',
+                }
                 return (
-                  <div key={s.scenario_id} className="flex items-center justify-between p-3 bg-surface-2 rounded">
-                    <div>
-                      <div className="text-sm font-medium">{s.display_name}</div>
-                      {result && (
-                        <div className={`text-xs mt-0.5 font-mono ${(result.portfolio_pnl_pct ?? 0) < -0.2 ? 'text-red' : 'text-ink-mid'}`}>
-                          {result.portfolio_pnl_pct != null ? `${(result.portfolio_pnl_pct*100).toFixed(1)}% · ${fmtChf(result.portfolio_pnl_chf)}` : ''}
-                        </div>
-                      )}
+                  <div key={cat}>
+                    <div className="text-[10px] font-mono text-ink-mid uppercase tracking-widest mb-2">{catLabels[cat]}</div>
+                    <div className="space-y-2">
+                      {catScenarios.map((s: any) => {
+                        const result = stressResults.find((r: any) =>
+                          r.scenario_id === s.scenario_id || r.scenario_id === s.slug
+                        )
+                        const pnlPct = result?.portfolio_pnl_pct
+                        const pnlChf = result?.portfolio_pnl_chf
+                        const severity = pnlPct != null
+                          ? pnlPct < -0.30 ? 'text-red' : pnlPct < -0.15 ? 'text-orange-500' : pnlPct < -0.05 ? 'text-amber' : 'text-teal'
+                          : 'text-ink-mid'
+                        return (
+                          <div key={s.scenario_id} className={`flex items-start justify-between p-3 rounded border ${
+                            result ? 'bg-surface-2 border-border' : 'bg-white border-border/60'
+                          }`}>
+                            <div className="flex-1 min-w-0 mr-3">
+                              <div className="text-xs font-medium text-ink">{s.display_name}</div>
+                              {s.description && !result && (
+                                <div className="text-[10px] text-ink-mid mt-0.5 leading-relaxed line-clamp-2">{s.description}</div>
+                              )}
+                              {result && (
+                                <div className="mt-1.5 space-y-1">
+                                  <div className={`text-sm font-mono font-medium ${severity}`}>
+                                    {pnlPct != null ? `${(pnlPct * 100).toFixed(1)}%` : '—'}
+                                    {pnlChf != null && (
+                                      <span className="text-xs ml-2 font-normal">
+                                        {pnlChf >= 0 ? '+' : ''}{pnlChf.toLocaleString('de-CH', { style: 'currency', currency: 'CHF', maximumFractionDigits: 0 })}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {result.worst_positions?.length > 0 && (
+                                    <div className="text-[10px] text-ink-mid">
+                                      Worst: {result.worst_positions.slice(0,3).map((p: any) => `${p.asset_symbol} ${p.shock_pct?.toFixed(0)}%`).join(' · ')}
+                                    </div>
+                                  )}
+                                  {result.post_nav_chf != null && (
+                                    <div className="text-[10px] text-ink-mid">
+                                      Post-stress NAV: {result.post_nav_chf.toLocaleString('de-CH', { style: 'currency', currency: 'CHF', maximumFractionDigits: 0 })}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                            <button
+                              onClick={() => runStress(s.scenario_id, s.display_name)}
+                              disabled={running === s.scenario_id}
+                              className="btn-secondary text-xs flex items-center gap-1 py-1 flex-shrink-0 disabled:opacity-50"
+                            >
+                              <Zap className="w-3 h-3" />
+                              {running === s.scenario_id ? 'Running…' : result ? 'Re-run' : 'Run'}
+                            </button>
+                          </div>
+                        )
+                      })}
                     </div>
-                    <button
-                      onClick={() => runStress(s.scenario_id, s.display_name)}
-                      disabled={running === s.scenario_id}
-                      className="btn-secondary text-xs flex items-center gap-1 py-1 disabled:opacity-50"
-                    >
-                      <Zap className="w-3 h-3" />
-                      {running === s.scenario_id ? 'Running…' : result ? 'Re-run' : 'Run'}
-                    </button>
                   </div>
                 )
               })}
