@@ -440,11 +440,11 @@ def apply_shock(positions: list, scenario: dict) -> dict:
 
 def run_stress_test(portfolio_id: str, scenario_id: str) -> dict:
     """
-    Run a stress test for a portfolio against a scenario.
-    Stores result in stress_test_results table.
-    Returns the result.
+    Run a stress test. scenario_id can be either:
+    - A slug string like "btc_crash_60" (built-in scenario)
+    - A UUID string (DB scenario)
     """
-    # Load portfolio + positions
+    # ── Step 1: Load positions ────────────────────────────────
     positions = (
         supabase.table("portfolio_positions")
         .select("asset_symbol, asset_class, market_value_chf, custodian_id, custodian_name")
@@ -454,7 +454,7 @@ def run_stress_test(portfolio_id: str, scenario_id: str) -> dict:
     ) or []
 
     if not positions:
-        return {"error": "No positions found"}
+        return {"error": "No positions found for this portfolio"}
 
     portfolio = (
         supabase.table("portfolios")
@@ -465,87 +465,64 @@ def run_stress_test(portfolio_id: str, scenario_id: str) -> dict:
         .data
     )
 
-    # Load scenario — try DB first (only if scenario_id looks like a UUID)
-    import re as _re
-    _uuid_re = _re.compile(
-        r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', _re.I)
-    scenario_row = None
-    if _uuid_re.match(str(scenario_id)):
-        try:
-            scenario_row = (
-                supabase.table("stress_scenarios")
-                .select("*")
-                .eq("scenario_id", scenario_id)
-                .single()
-                .execute()
-                .data
-            )
-        except Exception as _e:
-            print(f"[stress] DB scenario lookup: {_e}")
-    else:
-        # It's a slug — look up by slug column
-        try:
-            rows = (
-                supabase.table("stress_scenarios")
-                .select("*")
-                .eq("slug", scenario_id)
-                .execute()
-                .data
-            )
-            scenario_row = rows[0] if rows else None
-        except Exception as _e:
-            print(f"[stress] Slug lookup: {_e}")
+    # ── Step 2: Find the scenario ─────────────────────────────
+    # Priority: built-in SCENARIOS library (by slug) → DB (by UUID or slug)
+    scenario = next((s for s in SCENARIOS if s["slug"] == scenario_id), None)
 
-    if scenario_row:
-        shocks_raw = scenario_row.get("shocks", {})
-        # Convert DB format (simple symbol→shock) to extended format
-        if not any(k.startswith("__") for k in shocks_raw.keys()):
-            # Old format — wrap in new format
-            scenario = {
-                "slug": scenario_row["slug"],
-                "display_name": scenario_row["display_name"],
-                "shocks": {
-                    "__symbol_override": shocks_raw,
-                    "__asset_class": {
-                        "crypto":     shocks_raw.get("__crypto", -0.30),
-                        "stablecoin": shocks_raw.get("__stablecoin", -0.02),
-                        "equity":     shocks_raw.get("__equity", -0.05),
+    if scenario is None:
+        # Not a built-in slug — try DB
+        import re as _re
+        _is_uuid = bool(_re.match(
+            r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            str(scenario_id), _re.I
+        ))
+        try:
+            if _is_uuid:
+                row = (supabase.table("stress_scenarios")
+                       .select("*").eq("scenario_id", scenario_id)
+                       .single().execute().data)
+            else:
+                rows = (supabase.table("stress_scenarios")
+                        .select("*").eq("slug", scenario_id)
+                        .execute().data)
+                row = rows[0] if rows else None
+
+            if row:
+                shocks = row.get("shocks", {})
+                if not any(k.startswith("__") for k in shocks.keys()):
+                    shocks = {
+                        "__symbol_override": shocks,
+                        "__asset_class": {
+                            "crypto": -0.30, "stablecoin": -0.02, "equity": -0.05
+                        }
                     }
+                scenario = {
+                    "slug":         row["slug"],
+                    "display_name": row["display_name"],
+                    "shocks":       shocks,
                 }
-            }
-        else:
-            scenario = {"slug": scenario_row["slug"], "display_name": scenario_row["display_name"], "shocks": shocks_raw}
-    else:
-        # Try built-in scenarios
-        scenario = next((s for s in SCENARIOS if s["slug"] == scenario_id), None)
-        if not scenario:
-            return {"error": f"Scenario {scenario_id} not found"}
+        except Exception as e:
+            print(f"[stress] DB scenario lookup failed: {e}")
 
-    # Apply shocks
+    if scenario is None:
+        return {"error": f"Scenario '{scenario_id}' not found"}
+
+    # ── Step 3: Apply shocks ──────────────────────────────────
     result = apply_shock(positions, scenario)
 
-    # Resolve scenario UUID — try DB lookup, fall back to upsert, skip if all fails
-    import re
-    uuid_pattern = re.compile(
-        r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.I)
+    # ── Step 4: Resolve DB UUID for storage (best-effort) ─────
     db_scenario_id = None
-
     try:
-        if uuid_pattern.match(str(scenario_id)):
-            db_scenario_id = scenario_id
-        else:
-            rows = (supabase.table("stress_scenarios")
-                    .select("scenario_id")
-                    .eq("slug", scenario_id)
-                    .eq("tenant_id", settings.DEFAULT_TENANT_ID)
-                    .execute().data)
-            if rows:
-                db_scenario_id = rows[0]["scenario_id"]
+        rows = (supabase.table("stress_scenarios")
+                .select("scenario_id")
+                .eq("slug", scenario["slug"])
+                .execute().data)
+        db_scenario_id = rows[0]["scenario_id"] if rows else None
     except Exception as e:
-        print(f"[stress] UUID lookup: {e}")
+        print(f"[stress] UUID resolution skipped: {e}")
 
-    # Store result (best-effort — return result regardless)
-    as_of = portfolio.get("valuation_date") or date.today().isoformat()
+    # ── Step 5: Store result (best-effort) ────────────────────
+    as_of = (portfolio or {}).get("valuation_date") or date.today().isoformat()
     if db_scenario_id:
         try:
             stored = supabase.table("stress_test_results").insert({
@@ -562,16 +539,14 @@ def run_stress_test(portfolio_id: str, scenario_id: str) -> dict:
                 "counterparty_impacts": [],
                 "summary_text":         scenario["display_name"] + ": " + str(round(result["pnl_pct"], 1)) + "%",
             }).execute()
-            result["result_id"] = stored.data[0]["result_id"]
+            result["result_id"]  = stored.data[0]["result_id"]
             result["scenario_id"] = db_scenario_id
         except Exception as e:
-            print(f"[stress] Store error: {e}")
-            result["store_error"] = str(e)
+            print(f"[stress] Store skipped: {e}")
+            result["scenario_id"] = scenario_id
     else:
-        # No DB UUID — return result in-memory, include slug for frontend matching
         result["scenario_id"] = scenario_id
-        result["slug"] = scenario.get("slug", scenario_id)
-        print(f"[stress] Skipping DB store (no UUID for {scenario_id}) — returning in-memory result")
+        result["slug"]        = scenario["slug"]
 
     return result
 
