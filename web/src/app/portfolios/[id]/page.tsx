@@ -3,60 +3,85 @@ import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import AppLayout from '@/components/layout/AppLayout'
 import PageHeader from '@/components/layout/PageHeader'
-import { BarChart2, Zap, FileText } from 'lucide-react'
+import { Zap, FileText, Shield, AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react'
 import Link from 'next/link'
 import toast from 'react-hot-toast'
 import AiAnalysisPanel, { pollForAiResult } from './AiAnalysisPanel'
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-const H = () => ({ Authorization: `Bearer ${localStorage.getItem('raven_token')}`, 'Content-Type': 'application/json' })
+const H = () => ({ Authorization: 'Bearer ' + localStorage.getItem('raven_token'), 'Content-Type': 'application/json' })
 
-function MetricCard({ label, value, sub, accent }: any) {
+function MetricCard({ label, value, sub, accent }: { label: string, value: any, sub?: string, accent?: boolean }) {
   return (
     <div className="card p-4">
       <div className="label mb-2">{label}</div>
-      <div className={`text-2xl font-light ${accent ? 'text-red' : 'text-ink'}`}>{value ?? '—'}</div>
+      <div className={`text-2xl font-light ${accent ? 'text-red' : 'text-ink'}`}>{value ?? '-'}</div>
       {sub && <div className="text-xs text-ink-mid mt-1">{sub}</div>}
     </div>
   )
 }
 
-export default function PortfolioDetailPage() {
-  const { id }           = useParams()
-  const [portfolio, setPortfolio] = useState<any>(null)
-  const [metrics, setMetrics]     = useState<any>(null)
-  const [risk, setRisk]           = useState<any>(null)
-  const [positions, setPositions] = useState<any[]>([])
-  const [scenarios, setScenarios] = useState<any[]>([])
-  const [stressResults, setStressResults] = useState<any[]>([])
-  const [loading, setLoading]     = useState(true)
-  const [running, setRunning]     = useState<string | null>(null)
-  const [runningAll, setRunningAll] = useState(false)
-  const [aiResult, setAiResult]       = useState<any>(null)
-  const [aiRunning, setAiRunning]     = useState(false)
+function TierBadge({ tier }: { tier: string }) {
+  const cls = tier === 'LOW' ? 'bg-teal/10 text-teal'
+    : tier === 'MEDIUM' ? 'bg-amber/10 text-amber'
+    : tier === 'HIGH' ? 'bg-orange-500/10 text-orange-500'
+    : 'bg-red/10 text-red'
+  return <span className={'text-[10px] font-mono px-1.5 py-0.5 rounded ' + cls}>{tier}</span>
+}
 
-  const load = async () => {
+function ScoreBar({ score }: { score: number }) {
+  const color = score >= 75 ? 'bg-teal' : score >= 55 ? 'bg-amber' : score >= 35 ? 'bg-orange-500' : 'bg-red'
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex-1 h-1 bg-surface-2 rounded overflow-hidden">
+        <div className={color + ' h-full rounded'} style={{ width: score + '%' }} />
+      </div>
+      <span className="text-xs font-mono w-6 text-right">{score}</span>
+    </div>
+  )
+}
+
+function fmtChf(n: number | null | undefined): string {
+  if (n == null) return '-'
+  return 'CHF ' + n.toLocaleString('de-CH', { maximumFractionDigits: 0 })
+}
+
+export default function PortfolioDetailPage() {
+  const { id }                            = useParams()
+  const [portfolio, setPortfolio]         = useState<any>(null)
+  const [risk, setRisk]                   = useState<any>(null)
+  const [scenarios, setScenarios]         = useState<any[]>([])
+  const [stressResults, setStressResults] = useState<any[]>([])
+  const [loading, setLoading]             = useState(true)
+  const [running, setRunning]             = useState<string | null>(null)
+  const [runningAll, setRunningAll]       = useState(false)
+  const [aiResult, setAiResult]           = useState<any>(null)
+  const [aiRunning, setAiRunning]         = useState(false)
+  const [detailOpen, setDetailOpen]       = useState(false)
+
+  async function load() {
     setLoading(true)
     try {
-      const [pfRes, mRes, posRes, scRes, srRes, rRes] = await Promise.all([
-        fetch(`${API}/api/v1/portfolios`, { headers: H() }),
-        fetch(`${API}/api/v1/portfolios/${id}/metrics`, { headers: H() }),
-        fetch(`${API}/api/v1/portfolios/${id}/positions`, { headers: H() }),
-        fetch(`${API}/api/v1/stress/scenarios`, { headers: H() }),
-        fetch(`${API}/api/v1/stress/results/${id}`, { headers: H() }),
-        fetch(`${API}/api/v1/portfolios/${id}/risk`, { headers: H() }),
+      const [pfRes, scRes, srRes, rRes] = await Promise.all([
+        fetch(API + '/api/v1/portfolios', { headers: H() }),
+        fetch(API + '/api/v1/stress/scenarios', { headers: H() }),
+        fetch(API + '/api/v1/stress/results/' + id, { headers: H() }),
+        fetch(API + '/api/v1/portfolios/' + id + '/risk', { headers: H() }),
       ])
       const pfs = pfRes.ok ? await pfRes.json() : []
       setPortfolio(pfs.find((p: any) => p.portfolio_id === id) ?? null)
-      if (mRes.ok) setMetrics(await mRes.json())
-      if (posRes.ok) setPositions(await posRes.json())
       if (scRes.ok) setScenarios(await scRes.json())
       if (srRes.ok) setStressResults(await srRes.json())
-      if (rRes.ok)  setRisk(await rRes.json())
-    } catch {} finally { setLoading(false) }
+      if (rRes.ok) setRisk(await rRes.json())
+      const aiResp = await fetch(API + '/api/v1/portfolios/' + id + '/ai-analysis', { headers: H() })
+      if (aiResp.ok) {
+        const d = await aiResp.json()
+        if (d.status === 'ready') setAiResult(d.analysis)
+      }
+    } catch(e) {} finally { setLoading(false) }
   }
 
-  useEffect(() => { if (id) load() }, [id])
+  useEffect(function() { if (id) load() }, [id])
 
   function runAiAnalysis() {
     setAiRunning(true)
@@ -67,13 +92,11 @@ export default function PortfolioDetailPage() {
       .catch(function() { setAiRunning(false) })
   }
 
-  const runStress = async (scenario_id: string, name: string) => {
+  async function runStress(scenario_id: string, name: string) {
     setRunning(scenario_id)
     try {
       const r = await fetch(API + '/api/v1/portfolios/' + id + '/stress', {
-        method: 'POST',
-        headers: H(),
-        body: JSON.stringify({ scenario_id }),
+        method: 'POST', headers: H(), body: JSON.stringify({ scenario_id }),
       })
       if (r.ok) {
         const result = await r.json()
@@ -81,50 +104,43 @@ export default function PortfolioDetailPage() {
           scenario_id: result.scenario_id || result.slug || scenario_id,
           portfolio_pnl_pct: result.pnl_pct != null ? result.pnl_pct / 100 : null,
           portfolio_pnl_chf: result.pnl_chf,
-          pre_shock_nav_chf: result.pre_nav_chf,
-          post_shock_nav_chf: result.post_nav_chf,
         })
         setStressResults(function(prev: any[]) {
-          const filtered = prev.filter(function(x: any) {
+          return [merged].concat(prev.filter(function(x: any) {
             return x.scenario_id !== merged.scenario_id && x.scenario_id !== scenario_id
-          })
-          return [merged].concat(filtered)
+          }))
         })
-        const pct = result.pnl_pct != null ? result.pnl_pct.toFixed(1) + '%' : 'done'
-        toast.success(name + ': ' + pct)
-      } else {
-        const err = await r.json().catch(function() { return {} })
-        toast.error('Failed: ' + (err.detail || 'server error'))
-      }
+        toast.success(name + ': ' + (result.pnl_pct != null ? result.pnl_pct.toFixed(1) + '%' : 'done'))
+      } else { toast.error('Stress test failed') }
     } catch(e) { toast.error('Connection error') }
     finally { setRunning(null) }
   }
 
-  const runAllStress = async () => {
+  async function runAllStress() {
     setRunningAll(true)
     try {
-      await fetch(API + '/api/v1/portfolios/' + id + '/stress/run-all', {
-        method: 'POST', headers: H(),
-      })
-      toast.success('All 15 scenarios running in background - refresh in 60s')
+      await fetch(API + '/api/v1/portfolios/' + id + '/stress/run-all', { method: 'POST', headers: H() })
+      toast.success('All scenarios running - refresh in 60s')
       setTimeout(function() { load(); setRunningAll(false) }, 65000)
     } catch(e) { toast.error('Failed'); setRunningAll(false) }
   }
 
-  const fmt = (n: number | null | undefined, decimals = 2, prefix = '') =>
-    n != null ? `${prefix}${n.toFixed(decimals)}` : '-'
-
-  const fmtChf = (n: number | null | undefined) =>
-    n != null ? `CHF ${n.toLocaleString('en-CH', { maximumFractionDigits: 0 })}` : '-'
-
-  const fmtPct = (n: number | null | undefined) =>
-    n != null ? `${(n * 100).toFixed(2)}%` : '-'
+  const nav       = portfolio?.total_nav_chf || 0
+  const cpScore   = risk?.weighted_risk_score
+  const cpTier    = cpScore == null ? '-' : cpScore >= 75 ? 'LOW' : cpScore >= 55 ? 'MEDIUM' : cpScore >= 35 ? 'HIGH' : 'CRITICAL'
+  const exposures = (risk?.counterparty_exposures || []) as any[]
+  const finmaOk   = risk?.finma_compliant
+  const alerts    = risk?.open_alert_count || 0
+  const warnings  = risk?.concentration_warnings || []
+  const breaches  = risk?.limit_breaches || []
+  const corrGroups = risk?.correlation_groups || []
+  const catLabels: any = { crypto: 'Crypto & Custody', macro: 'Macro & Rates', equity: 'Equity Markets', tail: 'Tail Risk' }
 
   return (
     <AppLayout>
       <PageHeader
         title={portfolio?.display_name ?? 'Portfolio'}
-        subtitle={`${portfolio?.portfolio_ref ?? ''} - ${portfolio?.clients?.display_name ?? ''}`}
+        subtitle={(portfolio?.portfolio_ref ?? '') + ' - ' + ((portfolio?.clients as any)?.display_name ?? '')}
         action={
           <div className="flex gap-2">
             <button onClick={runAiAnalysis} disabled={aiRunning}
@@ -132,7 +148,7 @@ export default function PortfolioDetailPage() {
               <Zap className={'w-3.5 h-3.5' + (aiRunning ? ' animate-pulse' : '')} />
               {aiRunning ? 'Analysing...' : aiResult ? 'Re-analyse' : 'AI Analysis'}
             </button>
-            <Link href={`/reports?portfolio=${id}&client=${portfolio?.client_id}`}>
+            <Link href={'/reports?portfolio=' + id + '&client=' + portfolio?.client_id}>
               <button className="btn-primary text-xs flex items-center gap-1.5">
                 <FileText className="w-3.5 h-3.5" /> Generate Report
               </button>
@@ -142,99 +158,245 @@ export default function PortfolioDetailPage() {
       />
 
       <div className="p-8 space-y-6">
-        {/* Risk metrics */}
-        <div>
-          <div className="label mb-3">Risk Metrics</div>
-          <div className="grid grid-cols-4 gap-4">
-            <MetricCard label="Portfolio NAV" value={fmtChf(portfolio?.total_nav_chf)} sub="base currency CHF" />
-            <MetricCard label="VaR 95% (1-day)" value={fmtChf(metrics?.var_95_1d)} sub="historical simulation" accent={metrics?.var_95_1d > (portfolio?.total_nav_chf ?? 0) * 0.05} />
-            <MetricCard label="Max Drawdown 30d" value={fmtPct(metrics?.max_drawdown_30d)} sub="peak-to-trough" accent={(metrics?.max_drawdown_30d ?? 0) < -0.15} />
-            <MetricCard label="Sharpe Ratio" value={fmt(metrics?.sharpe_ratio_30d)} sub="30d annualised" />
+
+        {/* Status bar */}
+        <div className="flex items-center gap-4 py-3 px-5 bg-surface-2/50 rounded-lg border border-border text-xs">
+          <div className={'flex items-center gap-1.5 ' + (finmaOk === false ? 'text-red' : 'text-teal')}>
+            <Shield className="w-3.5 h-3.5" />
+            <span className={finmaOk === false ? 'font-medium' : ''}>
+              {finmaOk === false ? 'FINMA non-compliant' : 'FINMA compliant'}
+            </span>
           </div>
-          <div className="grid grid-cols-5 gap-4 mt-4">
-            <MetricCard label="Volatility 30d" value={fmtPct(metrics?.volatility_30d)} sub="annualised" />
-            <MetricCard label="Concentration (HHI)" value={fmt(metrics?.hhi, 4)} sub="1.0 = fully concentrated" accent={(metrics?.hhi ?? 0) > 0.25} />
-            <MetricCard label="Top Custodian" value={metrics?.top_custodian_name ?? '-'} sub={fmtPct(metrics?.top_custodian_pct) + ' of AuM'} accent={(metrics?.top_custodian_pct ?? 0) > 0.5} />
-            <MetricCard label="Market Risk Score" value={metrics?.risk_score_composite ? metrics.risk_score_composite + '/100' : '-'} sub={(metrics?.risk_tier ?? 'MEDIUM') + ' - VaR + volatility'} />
-            <MetricCard
-              label="Counterparty Risk Score"
-              value={risk != null && risk.weighted_risk_score != null ? risk.weighted_risk_score.toFixed(0) + '/100' : '-'}
-              sub={risk != null && risk.weighted_risk_score != null ? 'exposure-weighted counterparty' : 'click Recompute Risk'}
-              accent={risk != null && risk.weighted_risk_score != null && risk.weighted_risk_score < 55}
-            />
-          </div>
-          {!metrics && !loading && (
-            <div className="mt-3 text-xs text-ink-mid bg-surface-2 rounded p-3">
-              Metrics are computed in the background after upload. If this is a new portfolio, refresh in 30 seconds.
+          {alerts > 0 && (
+            <div className="flex items-center gap-1.5 text-amber">
+              <AlertTriangle className="w-3.5 h-3.5" />
+              <span>{alerts} open alert{alerts !== 1 ? 's' : ''}</span>
             </div>
           )}
+          {warnings.length > 0 && (
+            <div className="flex items-center gap-1.5 text-amber">
+              <AlertTriangle className="w-3.5 h-3.5" />
+              <span>{warnings.length} concentration warning{warnings.length !== 1 ? 's' : ''}</span>
+            </div>
+          )}
+          {breaches.length > 0 && (
+            <div className="flex items-center gap-1.5 text-red font-medium">
+              <AlertTriangle className="w-3.5 h-3.5" />
+              <span>{breaches.length} limit breach{breaches.length !== 1 ? 'es' : ''}</span>
+            </div>
+          )}
+          <div className="ml-auto text-ink-mid font-mono">{fmtChf(nav)} AUM</div>
         </div>
 
-        <div className="grid grid-cols-2 gap-6">
-          {/* AI Analysis */}
-          <AiAnalysisPanel aiResult={aiResult} aiRunning={aiRunning} />
+        {/* 5 counterparty-focused metrics */}
+        <div className="grid grid-cols-5 gap-4">
+          <MetricCard
+            label="Counterparty Risk Score"
+            value={cpScore != null ? cpScore.toFixed(0) + '/100' : '-'}
+            sub={cpTier + (risk?.score_delta_7d ? ' - ' + (risk.score_delta_7d > 0 ? '+' : '') + risk.score_delta_7d.toFixed(1) + ' (7d)' : '')}
+            accent={cpScore != null && cpScore < 55}
+          />
+          <MetricCard label="Counterparties" value={exposures.length || '-'} sub="custodians & protocols" />
+          <MetricCard
+            label="Largest Exposure"
+            value={exposures[0] ? exposures[0].pct + '%' : '-'}
+            sub={exposures[0] ? exposures[0].name : 'none'}
+            accent={exposures[0] ? exposures[0].pct >= 25 : false}
+          />
+          <MetricCard
+            label="Open Alerts"
+            value={String(alerts)}
+            sub={alerts > 0 ? 'requires attention' : 'all clear'}
+            accent={alerts > 0}
+          />
+          <MetricCard
+            label="Limit Breaches"
+            value={String(breaches.length)}
+            sub={breaches.length > 0 ? breaches[0].type + ' ' + breaches[0].key : 'within mandate'}
+            accent={breaches.length > 0}
+          />
+        </div>
 
-          {/* Positions */}
-          <div className="card">
+        {/* AI Analysis */}
+        <AiAnalysisPanel aiResult={aiResult} aiRunning={aiRunning} />
+
+        {/* Counterparty table + Stress tests */}
+        <div className="grid grid-cols-2 gap-6">
+
+          {/* Counterparty Exposure Table */}
+          <div className="card overflow-hidden">
             <div className="px-5 py-3 border-b border-border flex items-center justify-between">
-              <span className="label">Positions</span>
-              <span className="text-xs text-ink-mid">{positions.length} holdings</span>
+              <span className="label">Counterparty Exposures</span>
+              {risk?.computed_at && (
+                <span className="text-[10px] text-ink-mid font-mono">
+                  updated {new Date(risk.computed_at).toLocaleTimeString()}
+                </span>
+              )}
             </div>
-            <div className="overflow-auto" style={{ maxHeight: 400 }}>
-              <table className="w-full text-sm">
-                <thead className="sticky top-0 bg-surface-2">
-                  <tr>{['Asset','Class','Quantity','Value CHF','Weight','Custodian'].map(h => (
-                    <th key={h} className="label text-left px-4 py-2 font-normal text-[10px]">{h}</th>
-                  ))}</tr>
-                </thead>
-                <tbody>
-                  {positions.map((p: any) => (
-                    <tr key={p.position_id} className="border-t border-border hover:bg-surface-2/50">
-                      <td className="px-4 py-2 font-mono text-xs font-medium">{p.asset_symbol}</td>
-                      <td className="px-4 py-2 text-xs text-ink-mid">{p.asset_class}</td>
-                      <td className="px-4 py-2 text-xs font-mono">{Number(p.quantity).toLocaleString()}</td>
-                      <td className="px-4 py-2 text-xs">{p.market_value_chf ? Number(p.market_value_chf).toLocaleString('de-CH', {maximumFractionDigits:0}) : '-'}</td>
-                      <td className="px-4 py-2 text-xs">{p.weight_pct ? `${(p.weight_pct*100).toFixed(1)}%` : '-'}</td>
-                      <td className="px-4 py-2 text-xs text-ink-mid">{p.custodian_name ?? '-'}</td>
+            {exposures.length === 0 ? (
+              <div className="px-5 py-10 text-center">
+                <p className="text-xs text-ink-mid">No counterparty data yet.</p>
+                <p className="text-xs text-ink-mid mt-1">Go to Portfolios and click Recompute Risk.</p>
+              </div>
+            ) : (
+              <div className="overflow-auto" style={{ maxHeight: 480 }}>
+                <table className="w-full text-sm">
+                  <thead className="sticky top-0 bg-surface-2">
+                    <tr>
+                      {['Counterparty', 'Score', 'Tier', 'AUM', 'Weight'].map(function(h) {
+                        return <th key={h} className="label text-left px-4 py-2.5 font-normal text-[10px]">{h}</th>
+                      })}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {exposures.map(function(cp: any) {
+                      const pctNum = parseFloat(cp.pct) || 0
+                      const barColor = pctNum >= 40 ? 'bg-red' : pctNum >= 20 ? 'bg-amber' : 'bg-teal'
+                      return (
+                        <tr key={cp.counterparty_id} className="border-t border-border hover:bg-surface-2/30 transition-colors">
+                          <td className="px-4 py-3">
+                            <div className="text-xs font-medium text-ink">{cp.name}</div>
+                            <div className="text-[10px] text-ink-mid mt-0.5">{cp.entity_type} - {cp.jurisdiction}</div>
+                          </td>
+                          <td className="px-4 py-3 w-24">
+                            <ScoreBar score={cp.score || 50} />
+                          </td>
+                          <td className="px-4 py-3">
+                            <TierBadge tier={cp.tier || 'MEDIUM'} />
+                          </td>
+                          <td className="px-4 py-3 text-xs font-mono whitespace-nowrap">{fmtChf(cp.value_chf)}</td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-1.5">
+                              <div className="w-12 h-1 bg-surface-2 rounded overflow-hidden">
+                                <div className={'h-full rounded ' + barColor} style={{ width: Math.min(pctNum, 100) + '%' }} />
+                              </div>
+                              <span className={'text-xs font-mono ' + (pctNum >= 25 ? 'text-red font-semibold' : 'text-ink')}>{cp.pct}%</span>
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
 
-          {/* Stress tests */}
-          <div className="card">
-            <div className="px-5 py-3 border-b border-border">
-              <span className="label">Stress Test Scenarios</span>
+          {/* Stress Tests */}
+          <div className="card overflow-hidden flex flex-col">
+            <div className="px-5 py-3 border-b border-border flex items-center justify-between">
+              <span className="label">Stress Tests</span>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] text-ink-mid">{stressResults.length} run</span>
+                <button onClick={runAllStress} disabled={runningAll}
+                  className="btn-secondary text-[10px] py-1 px-2 disabled:opacity-50">
+                  {runningAll ? 'Running...' : 'Run All'}
+                </button>
+              </div>
             </div>
-            <div className="p-4 space-y-3">
-              {scenarios.map((s: any) => {
-                const result = stressResults.find((r: any) => r.scenario_id === s.scenario_id)
+            <div className="overflow-auto flex-1 p-4 space-y-4" style={{ maxHeight: 480 }}>
+              {(['crypto', 'macro', 'equity', 'tail'] as const).map(function(cat) {
+                const catScenarios = scenarios.filter(function(s: any) { return s.category === cat })
+                if (!catScenarios.length) return null
                 return (
-                  <div key={s.scenario_id} className="flex items-center justify-between p-3 bg-surface-2 rounded">
-                    <div>
-                      <div className="text-sm font-medium">{s.display_name}</div>
-                      {result && (
-                        <div className={`text-xs mt-0.5 font-mono ${(result.portfolio_pnl_pct ?? 0) < -0.2 ? 'text-red' : 'text-ink-mid'}`}>
-                          {result.portfolio_pnl_pct != null ? `${(result.portfolio_pnl_pct*100).toFixed(1)}% - ${fmtChf(result.portfolio_pnl_chf)}` : ''}
-                        </div>
-                      )}
+                  <div key={cat}>
+                    <div className="text-[10px] font-mono text-ink-mid uppercase tracking-widest mb-2">{catLabels[cat]}</div>
+                    <div className="space-y-1.5">
+                      {catScenarios.map(function(s: any) {
+                        const result = stressResults.find(function(r: any) {
+                          return r.scenario_id === s.scenario_id || r.scenario_id === s.slug
+                        })
+                        const pnlPct: number | null = result ? (result.portfolio_pnl_pct ?? null) : null
+                        const pnlChf: number | null = result ? (result.portfolio_pnl_chf ?? null) : null
+                        const sevColor = pnlPct == null ? '' : pnlPct < -0.30 ? 'text-red' : pnlPct < -0.15 ? 'text-orange-500' : pnlPct < -0.05 ? 'text-amber' : 'text-teal'
+                        return (
+                          <div key={s.scenario_id} className={'rounded border p-3 ' + (result ? 'border-border bg-surface-2/50' : 'border-border/50 bg-white')}>
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="text-xs font-medium text-ink">{s.display_name}</span>
+                                  {result && pnlPct != null && (
+                                    <span className={'text-xs font-mono font-semibold ' + sevColor}>
+                                      {(pnlPct * 100).toFixed(1)}%
+                                    </span>
+                                  )}
+                                </div>
+                                {result && pnlChf != null && (
+                                  <div className={'text-xs font-mono mt-0.5 ' + sevColor}>
+                                    {pnlChf >= 0 ? '+' : ''}CHF {Math.abs(pnlChf).toLocaleString('de-CH', { maximumFractionDigits: 0 })}
+                                  </div>
+                                )}
+                                {!result && <div className="text-[10px] text-ink-mid mt-0.5 line-clamp-1">{s.description}</div>}
+                              </div>
+                              <button onClick={function() { runStress(s.scenario_id, s.display_name) }}
+                                disabled={running === s.scenario_id}
+                                className="btn-secondary text-[10px] py-1 px-2 flex items-center gap-1 flex-shrink-0 disabled:opacity-50">
+                                <Zap className="w-3 h-3" />
+                                {running === s.scenario_id ? '...' : result ? 'Re-run' : 'Run'}
+                              </button>
+                            </div>
+                          </div>
+                        )
+                      })}
                     </div>
-                    <button
-                      onClick={() => runStress(s.scenario_id, s.display_name)}
-                      disabled={running === s.scenario_id}
-                      className="btn-secondary text-xs flex items-center gap-1 py-1 disabled:opacity-50"
-                    >
-                      <Zap className="w-3 h-3" />
-                      {running === s.scenario_id ? 'Running...' : result ? 'Re-run' : 'Run'}
-                    </button>
                   </div>
                 )
               })}
             </div>
           </div>
         </div>
+
+        {/* Risk Detail - collapsible */}
+        {(warnings.length > 0 || breaches.length > 0 || corrGroups.length > 0) && (
+          <div className="card overflow-hidden">
+            <button onClick={function() { setDetailOpen(function(v) { return !v }) }}
+              className="w-full px-5 py-3 flex items-center justify-between hover:bg-surface-2/30 transition-colors">
+              <span className="label">Risk Detail</span>
+              {detailOpen ? <ChevronUp className="w-4 h-4 text-ink-mid" /> : <ChevronDown className="w-4 h-4 text-ink-mid" />}
+            </button>
+            {detailOpen && (
+              <div className="border-t border-border grid grid-cols-3 divide-x divide-border">
+                <div className="p-4">
+                  <div className="text-[10px] font-mono text-ink-mid uppercase tracking-widest mb-3">Concentration</div>
+                  {warnings.length === 0 ? <p className="text-xs text-ink-mid">None</p>
+                    : warnings.map(function(w: any) {
+                      return (
+                        <div key={w.name} className="flex justify-between text-xs py-0.5">
+                          <span>{w.name}</span>
+                          <span className={'font-mono ' + (w.severity === 'CRITICAL' ? 'text-red' : 'text-amber')}>{w.pct}%</span>
+                        </div>
+                      )
+                    })}
+                </div>
+                <div className="p-4">
+                  <div className="text-[10px] font-mono text-ink-mid uppercase tracking-widest mb-3">Limit Breaches</div>
+                  {breaches.length === 0 ? <p className="text-xs text-ink-mid">None</p>
+                    : breaches.map(function(b: any, i: number) {
+                      return (
+                        <div key={i} className="py-0.5">
+                          <div className="text-xs font-medium text-red">{b.type} {b.key}</div>
+                          <div className="text-[10px] text-ink-mid">limit {b.limit_pct}% - actual {b.actual_pct}%</div>
+                        </div>
+                      )
+                    })}
+                </div>
+                <div className="p-4">
+                  <div className="text-[10px] font-mono text-ink-mid uppercase tracking-widest mb-3">Correlation Groups</div>
+                  {corrGroups.length === 0 ? <p className="text-xs text-ink-mid">None</p>
+                    : corrGroups.map(function(g: any) {
+                      return (
+                        <div key={g.group} className="py-0.5">
+                          <div className="text-xs font-medium">{g.group}</div>
+                          <div className="text-[10px] text-amber font-mono">{g.combined_pct}% combined</div>
+                        </div>
+                      )
+                    })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
       </div>
     </AppLayout>
   )
