@@ -201,7 +201,6 @@ async def get_portfolio_risk(
     from app.workers.portfolio_risk import compute_portfolio_risk
 
     if not refresh:
-        # Try cache first
         cached = (
             supabase.table("portfolio_risk_cache")
             .select("*")
@@ -210,7 +209,10 @@ async def get_portfolio_risk(
             .data
         )
         if cached:
-            return cached[0]
+            row = cached[0]
+            # Recompute if counterparty_exposures missing (old cache format)
+            if row.get("counterparty_exposures") is not None:
+                return row
 
     # Compute fresh
     return compute_portfolio_risk(portfolio_id)

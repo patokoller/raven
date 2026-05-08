@@ -73,3 +73,7 @@ SELECT 'portfolio risk management tables created' as status;
 ALTER TABLE portfolio_risk_cache
   ADD COLUMN IF NOT EXISTS ai_analysis    JSONB,
   ADD COLUMN IF NOT EXISTS ai_analysed_at TIMESTAMPTZ;
+
+-- Add counterparty_exposures column to cache (run if missing)
+ALTER TABLE portfolio_risk_cache
+  ADD COLUMN IF NOT EXISTS counterparty_exposures JSONB DEFAULT '[]';

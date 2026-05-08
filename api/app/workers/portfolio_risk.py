@@ -373,6 +373,7 @@ def compute_portfolio_risk(portfolio_id: str) -> dict:
             "open_alert_count":      alert_count,
             "latest_report_status":  report_status,
             "latest_report_date":    report_date,
+            "counterparty_exposures": result["counterparty_exposures"],
         }, on_conflict="portfolio_id").execute()
     except Exception as e:
         print(f"[portfolio_risk] Cache write error: {e}")
