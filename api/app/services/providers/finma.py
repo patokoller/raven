@@ -182,44 +182,77 @@ def _parse_institution(record: dict) -> dict:
     return result
 
 
+
 def enrich_counterparty(slug: str, display_name: str = "") -> dict:
     """
     Main entry point. Returns FINMA data for a Swiss counterparty.
+    Uses Claude web search since FINMA blocks direct API access (403).
+    Falls back to enrichment_data if already cached.
     """
-    # Try known ID first
-    finma_id = FINMA_ID_MAP.get(slug)
-    record   = None
+    from anthropic import Anthropic
+    import os, json as _json
 
-    if finma_id:
-        record = get_institution_detail(finma_id)
+    try:
+        client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+        prompt = f"""Search for FINMA (Swiss Financial Market Supervisory Authority) regulatory information for: {display_name}
 
-    # Search by display name
-    if not record and display_name:
-        results = search_institution(display_name)
-        if results:
-            # Best match: name contains our search term
-            for r in results:
-                r_name = (
-                    r.get("name") or r.get("firmName") or ""
-                ).lower()
-                if display_name.lower() in r_name or r_name in display_name.lower():
-                    record = r
-                    break
-            if not record:
-                record = results[0]
+Find:
+1. Is this entity currently FINMA-supervised? (yes/no)
+2. What type of FINMA licence do they hold? (banking licence, securities firm, asset manager, fintech, DLT trading venue, etc.)
+3. Is the licence currently active?
+4. Any recent enforcement actions or conditions (last 12 months)?
+5. Approximate year licence was granted
 
-    # Try with shortened name (e.g. "Bitcoin Suisse" → "Bitcoin")
-    if not record and display_name:
-        short = display_name.split()[0]
-        results = search_institution(short)
-        if results:
-            for r in results:
-                r_name = (r.get("name") or r.get("firmName") or "").lower()
-                if display_name.lower() in r_name:
-                    record = r
-                    break
+Check: https://www.finma.ch/en/authorisation/supervised-institutions/
 
-    if not record:
-        return {"source": "finma", "available": False, "slug": slug}
+Respond ONLY with valid JSON:
+{{"supervised": true/false, "licence_type": "string", "licence_active": true/false, "enforcement_actions_12m": 0, "licence_year": null, "finma_url": "string or null", "notes": "string"}}"""
 
-    return _parse_institution(record)
+        response = client.messages.create(
+            model="claude-opus-4-5",
+            max_tokens=500,
+            tools=[{"type": "web_search_20250305", "name": "web_search"}],
+            messages=[{"role": "user", "content": prompt}],
+        )
+
+        # Extract text from response
+        raw = ""
+        for block in response.content:
+            if hasattr(block, "text"):
+                raw += block.text
+
+        # Parse JSON
+        import re as _re
+        match = _re.search(r"\{[^{}]+\}", raw, _re.DOTALL)
+        if match:
+            data = _json.loads(match.group())
+            result = {
+                "source":    "finma_websearch",
+                "available": data.get("supervised", False),
+                "fetched_at": datetime.utcnow().isoformat(),
+            }
+            if data.get("supervised"):
+                result["license_active"]      = data.get("licence_active", True)
+                result["finma_licence_type"]  = data.get("licence_type", "")
+                result["enforcement_actions_12m"] = data.get("enforcement_actions_12m", 0)
+                result["finma_url"]           = data.get("finma_url")
+                result["finma_notes"]         = data.get("notes")
+                if data.get("licence_year"):
+                    result["years_regulated"] = datetime.utcnow().year - int(data["licence_year"])
+            return result
+    except Exception as e:
+        print(f"[finma] Web search error for {display_name}: {e}")
+
+    # If all fails, try legacy HTTP search
+    results = search_institution(display_name) if display_name else []
+    if not results and display_name:
+        results = search_institution(display_name.split()[0])
+
+    if results:
+        for r in results:
+            r_name = (r.get("name") or r.get("firmName") or "").lower()
+            if display_name.lower() in r_name or r_name in display_name.lower():
+                return _parse_institution(r)
+        return _parse_institution(results[0])
+
+    return {"source": "finma", "available": False, "slug": slug, "reason": "not_found"}

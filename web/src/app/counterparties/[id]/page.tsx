@@ -649,8 +649,8 @@ export default function CounterpartyDetailPage() {
                               )}
                             </>
                           ) : (
-                            <span className="text-[10px] text-ink-mid">
-                              not applicable
+                            <span className="text-[10px] text-ink-mid italic">
+                              unavailable
                             </span>
                           )}
                         </div>
@@ -660,7 +660,7 @@ export default function CounterpartyDetailPage() {
                 })}
                 <div className="pt-2 border-t border-border mt-2">
                   <p className="text-[10px] text-ink-mid leading-relaxed">
-                    Sources marked "not applicable" don't cover this entity type or jurisdiction. AI web search fills these gaps during research.
+                    Sources marked "unavailable" could not be accessed at this time. AI web search fills these gaps during research.
                   </p>
                 </div>
               </div>
