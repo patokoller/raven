@@ -1,258 +1,236 @@
 """
 Raven — FINMA Supervised Institutions Provider
-Swiss Financial Market Supervisory Authority
 
-Scrapes the FINMA public supervised institutions list to confirm:
-- Exact licence type (banking licence, securities firm, asset manager,
-  fintech licence, DLT trading venue)
-- Supervision status (active, withdrawn, revoked, expired)
-- Licence grant date
-- Licence conditions
+Downloads and parses the official FINMA Excel list of all
+banks and securities firms authorised in Switzerland.
 
-No API key required. Public data from finma.ch.
+Source: https://www.finma.ch/en/finma-public/authorised-institutions-individuals-and-products/
+Excel: https://www.finma.ch/en/~/media/finma/dokumente/bewilligungstraeger/xlsx/beh.xlsx
+PDF:   https://www.finma.ch/en/~/media/finma/dokumente/bewilligungstraeger/pdf/beh.pdf
 
-Search endpoint: https://www.finma.ch/en/authorisation/supervised-institutions/
-API: https://www.finma.ch/api/supervised-institutions (internal JSON API)
-
-Relevant counterparties:
-- Sygnum Bank AG       → banking licence
-- SEBA Bank AG         → banking licence
-- Bitcoin Suisse AG    → SRO/securities dealer
-- Taurus Group SA      → securities firm
-- Maerki Baumann       → banking licence (private bank)
-- Bitcoin Suisse       → ARIF/VQF SRO member
+Updated: monthly by FINMA
+No auth required. Public data.
 """
 
 import httpx
-from typing import Optional
+import io
+import re
 from datetime import datetime
+from typing import Optional
 
-# FINMA uses an internal JSON API on their website
-FINMA_SEARCH = "https://www.finma.ch/api/supervised-institutions"
-FINMA_BASE   = "https://www.finma.ch"
+FINMA_XLSX_URL = "https://www.finma.ch/en/~/media/finma/dokumente/bewilligungstraeger/xlsx/beh.xlsx"
+FINMA_PDF_URL  = "https://www.finma.ch/en/~/media/finma/dokumente/bewilligungstraeger/pdf/beh.pdf"
+FINMA_PAGE_URL = "https://www.finma.ch/en/finma-public/authorised-institutions-individuals-and-products/"
 
 HEADERS = {
-    "Accept":          "application/json, text/plain, */*",
-    "Accept-Language": "en-US,en;q=0.9",
-    "User-Agent":      "Raven Risk Intelligence / contact@raven.internal",
-    "Referer":         "https://www.finma.ch/en/authorisation/supervised-institutions/",
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept":     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/octet-stream, */*",
+    "Referer":    FINMA_PAGE_URL,
 }
 
-# Licence category mappings (FINMA category codes → human readable)
-LICENCE_CATEGORIES = {
-    "bank":              "Banking Licence",
-    "bank_fintech":      "Fintech Licence (Banking Act Art. 1b)",
-    "securities_firm":   "Securities Firm Licence",
-    "asset_manager":     "Asset Manager Licence",
-    "fund_management":   "Fund Management Company Licence",
-    "insurance":         "Insurance Licence",
-    "dlt_trading":       "DLT Trading Venue Licence",
-    "sro":               "Self-Regulatory Organisation",
-    "cis":               "Collective Investment Schemes",
-}
-
-# Known FINMA entity IDs for our counterparties (avoids search)
-FINMA_ID_MAP = {
-    "sygnum":         None,  # search by name
-    "seba-bank":      None,
-    "bitcoin-suisse": None,
-    "taurus":         None,
-    "maerki-baumann": None,
-}
+# Cache the parsed institution list (refresh daily)
+_CACHE: dict = {}
+_CACHE_TTL = 3600 * 24  # 24h
 
 
-def search_institution(name: str, lang: str = "en") -> list:
-    """
-    Search FINMA supervised institutions by name.
-    Returns list of matching institutions.
-    """
+def _download_xlsx() -> Optional[bytes]:
+    """Download FINMA Excel file."""
     try:
-        r = httpx.get(
-            FINMA_SEARCH,
-            params={
-                "name":     name,
-                "lang":     lang,
-                "maxItems": 10,
-            },
-            headers=HEADERS,
-            timeout=12,
-        )
+        r = httpx.get(FINMA_XLSX_URL, headers=HEADERS, timeout=30, follow_redirects=True)
         if r.status_code == 200:
-            data = r.json()
-            # FINMA returns either a list or a dict with 'items'
-            if isinstance(data, list):
-                return data
-            return data.get("items", data.get("results", []))
-        # Try alternative URL format
-        r2 = httpx.get(
-            f"{FINMA_BASE}/en/authorisation/supervised-institutions/",
-            params={"name": name, "format": "json"},
-            headers=HEADERS,
-            timeout=12,
-        )
-        if r2.status_code == 200:
-            try:
-                return r2.json()
-            except Exception:
-                pass
+            return r.content
+        print(f"[finma] Excel download: HTTP {r.status_code}")
     except Exception as e:
-        print(f"[finma] Search error for '{name}': {e}")
-    return []
-
-
-def get_institution_detail(finma_id: str) -> Optional[dict]:
-    """Fetch detailed record for a specific FINMA entity ID."""
-    try:
-        r = httpx.get(
-            f"{FINMA_SEARCH}/{finma_id}",
-            headers=HEADERS,
-            timeout=12,
-        )
-        if r.status_code == 200:
-            return r.json()
-    except Exception as e:
-        print(f"[finma] Detail error for {finma_id}: {e}")
+        print(f"[finma] Excel download error: {e}")
     return None
 
 
-def _parse_institution(record: dict) -> dict:
-    """Parse a FINMA institution record into Raven scoring fields."""
-    result = {
-        "source":    "finma",
-        "available": True,
-        "fetched_at": datetime.utcnow().isoformat(),
-    }
+def _parse_xlsx(data: bytes) -> list:
+    """
+    Parse FINMA Excel into list of institution dicts.
+    FINMA Excel columns (beh.xlsx) typically include:
+    - Institution name (German/French/Italian)
+    - Licence type
+    - Location/domicile
+    - Authorisation date
+    - Status (active/withdrawn)
+    - FINMA profile URL
+    """
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
 
-    # Status
-    status = (
-        record.get("status") or
-        record.get("Status") or
-        record.get("authorisationStatus") or ""
-    ).lower()
+        institutions = []
+        for sheet_name in wb.sheetnames:
+            ws = wb[sheet_name]
+            rows = list(ws.iter_rows(values_only=True))
+            if not rows:
+                continue
 
-    active_statuses = ("authorised", "active", "bewilligt", "autorisé", "autorizzato")
-    result["license_active"]  = any(s in status for s in active_statuses)
-    result["finma_status"]    = status
+            # Find header row — look for row containing name-like column
+            header_row = None
+            header_idx = 0
+            for i, row in enumerate(rows[:10]):
+                row_str = [str(c or "").lower() for c in row]
+                if any(k in " ".join(row_str) for k in ("name", "firma", "raison", "institution", "bank")):
+                    header_row = row
+                    header_idx = i
+                    break
 
-    # Licence type
-    category = (
-        record.get("category") or
-        record.get("licenceCategory") or
-        record.get("authorisationType") or
-        record.get("type") or ""
-    )
-    result["finma_licence_type"] = LICENCE_CATEGORIES.get(
-        category.lower().replace(" ", "_"),
-        category
-    )
-    result["finma_category_raw"] = category
+            if header_row is None:
+                continue
 
-    # Licence grant date → years in operation (as regulated entity)
-    for date_field in ("authorisationDate", "licenceDate", "grantDate", "since"):
-        date_val = record.get(date_field)
-        if date_val:
-            try:
-                d = datetime.strptime(str(date_val)[:10], "%Y-%m-%d")
-                result["licence_granted_date"] = str(d.date())
-                # Don't override years_in_operation from Zefix (founding date is earlier)
-                result["years_regulated"] = (datetime.utcnow() - d).days // 365
-            except Exception:
-                pass
-            break
+            # Map column indices
+            headers = [str(h or "").strip().lower() for h in header_row]
 
-    # Legal name and address
-    result["finma_legal_name"] = (
-        record.get("name") or
-        record.get("firmName") or
-        record.get("legalName")
-    )
-    result["finma_domicile"] = record.get("domicile") or record.get("city")
+            def col(keywords):
+                for kw in keywords:
+                    for i, h in enumerate(headers):
+                        if kw in h:
+                            return i
+                return None
 
-    # FINMA profile link
-    finma_id = record.get("id") or record.get("entityId")
-    if finma_id:
-        result["finma_url"] = f"https://www.finma.ch/en/authorisation/supervised-institutions/supervised-institutions-detail/?institutionId={finma_id}"
+            name_col    = col(["firma", "name", "institution", "raison"])
+            type_col    = col(["kategorie", "type", "bewilligung", "licence", "kategori"])
+            status_col  = col(["status", "zustand", "état"])
+            city_col    = col(["ort", "city", "lieu", "domicile", "sitz"])
+            date_col    = col(["datum", "date", "seit", "since", "autorisation"])
 
-    # Conditions / restrictions
-    conditions = record.get("conditions") or record.get("requirements") or []
-    result["has_finma_conditions"] = bool(conditions)
-    if conditions:
-        result["enforcement_actions_12m"] = 1  # conservative proxy
+            if name_col is None:
+                continue
 
-    return result
+            for row in rows[header_idx + 1:]:
+                if not row or not row[name_col]:
+                    continue
+                name_val = str(row[name_col] or "").strip()
+                if not name_val or len(name_val) < 2:
+                    continue
 
+                inst = {
+                    "name":          name_val,
+                    "licence_type":  str(row[type_col] or "").strip() if type_col is not None else "",
+                    "status":        str(row[status_col] or "").strip() if status_col is not None else "",
+                    "city":          str(row[city_col] or "").strip() if city_col is not None else "",
+                    "auth_date":     str(row[date_col] or "").strip() if date_col is not None else "",
+                    "sheet":         sheet_name,
+                }
+                institutions.append(inst)
+
+        return institutions
+    except ImportError:
+        print("[finma] openpyxl not installed")
+    except Exception as e:
+        print(f"[finma] Excel parse error: {e}")
+    return []
+
+
+def _get_institutions() -> list:
+    """Get cached or fresh FINMA institution list."""
+    if "institutions" in _CACHE:
+        entry = _CACHE["institutions"]
+        if (datetime.utcnow() - entry["ts"]).seconds < _CACHE_TTL:
+            return entry["data"]
+
+    data = _download_xlsx()
+    if data:
+        institutions = _parse_xlsx(data)
+        if institutions:
+            _CACHE["institutions"] = {"data": institutions, "ts": datetime.utcnow()}
+            print(f"[finma] Loaded {len(institutions)} institutions from Excel")
+            return institutions
+
+    return _CACHE.get("institutions", {}).get("data", [])
+
+
+def _find_institution(display_name: str, slug: str = "") -> Optional[dict]:
+    """Search FINMA institution list by name."""
+    institutions = _get_institutions()
+    if not institutions:
+        return None
+
+    name_lower = display_name.lower().strip()
+    slug_lower = slug.lower().strip()
+
+    # Exact match first
+    for inst in institutions:
+        if inst["name"].lower() == name_lower:
+            return inst
+
+    # Substring match
+    best = None
+    best_score = 0
+    for inst in institutions:
+        inst_lower = inst["name"].lower()
+        # Check both directions
+        if name_lower in inst_lower:
+            score = len(name_lower) / len(inst_lower)
+        elif inst_lower in name_lower:
+            score = len(inst_lower) / len(name_lower)
+        else:
+            # Check slug
+            score = 0
+            if slug_lower and len(slug_lower) >= 4:
+                slug_parts = slug_lower.replace("-", " ").split()
+                matches = sum(1 for part in slug_parts if part in inst_lower)
+                score = matches / max(len(slug_parts), 1) * 0.6
+
+        if score > best_score and score >= 0.5:
+            best_score = score
+            best = inst
+
+    return best
 
 
 def enrich_counterparty(slug: str, display_name: str = "") -> dict:
     """
-    Main entry point. Returns FINMA data for a Swiss counterparty.
-    Uses Claude web search since FINMA blocks direct API access (403).
-    Falls back to enrichment_data if already cached.
+    Main entry point. Look up entity in FINMA Excel register.
+    Returns licence type, status, city, authorisation date.
     """
-    from anthropic import Anthropic
-    import os, json as _json
+    result = {
+        "source":     "finma_xlsx",
+        "available":  False,
+        "fetched_at": datetime.utcnow().isoformat(),
+    }
 
-    try:
-        client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
-        prompt = f"""Search for FINMA (Swiss Financial Market Supervisory Authority) regulatory information for: {display_name}
+    inst = _find_institution(display_name or slug, slug)
 
-Find:
-1. Is this entity currently FINMA-supervised? (yes/no)
-2. What type of FINMA licence do they hold? (banking licence, securities firm, asset manager, fintech, DLT trading venue, etc.)
-3. Is the licence currently active?
-4. Any recent enforcement actions or conditions (last 12 months)?
-5. Approximate year licence was granted
+    if not inst:
+        # Try with just first significant word
+        first_word = (display_name or slug).split()[0] if (display_name or slug) else ""
+        if len(first_word) >= 4:
+            inst = _find_institution(first_word)
 
-Check: https://www.finma.ch/en/authorisation/supervised-institutions/
+    if not inst:
+        result["reason"] = "not_found_in_finma_xlsx"
+        return result
 
-Respond ONLY with valid JSON:
-{{"supervised": true/false, "licence_type": "string", "licence_active": true/false, "enforcement_actions_12m": 0, "licence_year": null, "finma_url": "string or null", "notes": "string"}}"""
+    # Determine if licence is active
+    status_lower = inst.get("status", "").lower()
+    active_terms = ("aktiv", "active", "bewilligt", "authorised", "autorisé", "autorizzato", "")
+    withdrawn    = ("entzogen", "withdrawn", "widerrufen", "révoqué", "revocato", "expired")
+    is_active    = not any(t in status_lower for t in withdrawn)
 
-        response = client.messages.create(
-            model="claude-opus-4-5",
-            max_tokens=500,
-            tools=[{"type": "web_search_20250305", "name": "web_search"}],
-            messages=[{"role": "user", "content": prompt}],
-        )
+    result.update({
+        "available":         True,
+        "license_active":    is_active,
+        "finma_legal_name":  inst["name"],
+        "finma_licence_type": inst.get("licence_type") or inst.get("sheet", ""),
+        "finma_status":      inst.get("status", ""),
+        "finma_city":        inst.get("city", ""),
+        "finma_auth_date":   inst.get("auth_date", ""),
+        "finma_source":      "beh.xlsx",
+        "finma_url":         FINMA_PAGE_URL,
+        "xlsx_url":          FINMA_XLSX_URL,
+    })
 
-        # Extract text from response
-        raw = ""
-        for block in response.content:
-            if hasattr(block, "text"):
-                raw += block.text
+    if inst.get("auth_date"):
+        # Try to compute years regulated
+        for fmt in ("%d.%m.%Y", "%Y-%m-%d", "%Y", "%d/%m/%Y"):
+            try:
+                d = datetime.strptime(inst["auth_date"][:10], fmt)
+                result["years_regulated"] = (datetime.utcnow() - d).days // 365
+                break
+            except Exception:
+                continue
 
-        # Parse JSON
-        import re as _re
-        match = _re.search(r"\{[^{}]+\}", raw, _re.DOTALL)
-        if match:
-            data = _json.loads(match.group())
-            result = {
-                "source":    "finma_websearch",
-                "available": data.get("supervised", False),
-                "fetched_at": datetime.utcnow().isoformat(),
-            }
-            if data.get("supervised"):
-                result["license_active"]      = data.get("licence_active", True)
-                result["finma_licence_type"]  = data.get("licence_type", "")
-                result["enforcement_actions_12m"] = data.get("enforcement_actions_12m", 0)
-                result["finma_url"]           = data.get("finma_url")
-                result["finma_notes"]         = data.get("notes")
-                if data.get("licence_year"):
-                    result["years_regulated"] = datetime.utcnow().year - int(data["licence_year"])
-            return result
-    except Exception as e:
-        print(f"[finma] Web search error for {display_name}: {e}")
-
-    # If all fails, try legacy HTTP search
-    results = search_institution(display_name) if display_name else []
-    if not results and display_name:
-        results = search_institution(display_name.split()[0])
-
-    if results:
-        for r in results:
-            r_name = (r.get("name") or r.get("firmName") or "").lower()
-            if display_name.lower() in r_name or r_name in display_name.lower():
-                return _parse_institution(r)
-        return _parse_institution(results[0])
-
-    return {"source": "finma", "available": False, "slug": slug, "reason": "not_found"}
+    return result

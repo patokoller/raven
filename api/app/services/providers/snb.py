@@ -2,133 +2,119 @@
 Raven — SNB Banking Statistics Provider
 Swiss National Bank Data Portal
 
-Public REST API: https://data.snb.ch/api/cube/{cube}/data/{format}/{lang}
-No auth required. CSV and JSON formats available.
+Correct API pattern:
+  https://data.snb.ch/{language}/warehouse/{ID}/{format}
 
-Banking sector cubes (verified from data.snb.ch):
-- bankbstajb   : Annual banking sector balance sheet statistics
-- bankbstaq    : Quarterly banking sector balance sheet statistics  
-- bankeigenka  : Capital ratios for Swiss banks (annual)
-- bankliqmon   : Monthly liquidity statistics
+Warehouse IDs:
+  BSTA  = Banking sector balance sheet statistics
+  BSEIG = Capital adequacy
+  BSLIQ = Liquidity
 
-API pattern:
-  GET https://data.snb.ch/api/cube/bankbstajb/data/json/en?fromDate=2022&toDate=2024
-  GET https://data.snb.ch/api/cube/bankbstajb/dimensions/en   (structure)
+No auth required. Public data.
 """
 
 import httpx
-import json
 from datetime import datetime
 
-SNB_BASE = "https://data.snb.ch/api"
+SNB_BASE = "https://data.snb.ch"
 HEADERS  = {
     "User-Agent": "Raven Risk Intelligence / raven.internal",
-    "Accept":     "application/json",
+    "Accept":     "application/json, text/csv, */*",
 }
 
-# Key banking cubes — verified against SNB data portal
-CUBES = {
-    "balance_sheet_annual":   "bankbstajb",
-    "balance_sheet_monthly":  "bankbstaq",
-    "capital_ratios":         "bankeigenka",
-    "liquidity":              "bankliqmon",
-}
+_CACHE: dict = {}
+_CACHE_TTL   = 3600 * 6  # 6 hours
 
 
-def _fetch_cube(cube: str, from_date: str = "2022", to_date: str = "2025",
-                dim_sel: str = None) -> dict:
-    """Fetch data from an SNB cube."""
-    params = {"fromDate": from_date, "toDate": to_date}
-    if dim_sel:
-        params["dimSel"] = dim_sel
+def _fetch(warehouse: str, lang: str = "en", fmt: str = "json") -> dict:
+    """Fetch from SNB warehouse. URL: /en/warehouse/BSTA/json"""
+    key = f"{warehouse}_{fmt}"
+    if key in _CACHE:
+        entry = _CACHE[key]
+        if (datetime.utcnow() - entry["ts"]).seconds < _CACHE_TTL:
+            return entry["data"]
+
+    url = f"{SNB_BASE}/{lang}/warehouse/{warehouse}/{fmt}"
     try:
-        url = f"{SNB_BASE}/cube/{cube}/data/json/en"
-        r   = httpx.get(url, params=params, headers=HEADERS, timeout=20)
+        r = httpx.get(url, headers=HEADERS, timeout=20, follow_redirects=True)
         if r.status_code == 200:
-            return r.json()
-        # Try alternative URL format
-        url2 = f"{SNB_BASE}/cube/{cube}/data/json"
-        r2   = httpx.get(url2, params={**params, "lang": "en"}, headers=HEADERS, timeout=20)
-        if r2.status_code == 200:
-            return r2.json()
+            data = r.json() if fmt == "json" else {"raw": r.text, "ok": True}
+            _CACHE[key] = {"data": data, "ts": datetime.utcnow()}
+            return data
+        print(f"[snb] {warehouse}: HTTP {r.status_code} — {r.text[:100]}")
     except Exception as e:
-        print(f"[snb] Cube {cube} error: {e}")
+        print(f"[snb] {warehouse} error: {e}")
     return {}
-
-
-def _parse_latest_observation(data: dict) -> tuple:
-    """Extract the latest value and date from an SNB JSON response."""
-    # SNB JSON format: {"observations": [{"date": "2023", "value": 1234.5}, ...]}
-    obs = data.get("observations") or data.get("data") or []
-    if not obs:
-        # Try nested structure
-        datasets = data.get("datasets") or []
-        for ds in datasets:
-            obs = ds.get("observations") or []
-            if obs:
-                break
-    if obs:
-        latest = obs[-1]
-        return latest.get("value"), latest.get("date")
-    return None, None
-
-
-def get_sector_statistics() -> dict:
-    """
-    Fetch Swiss banking sector aggregate statistics.
-    Returns total assets, capital ratios, etc. for Swiss banking sector.
-    Used as reference benchmark and for enriching CH bank counterparties.
-    """
-    result = {
-        "source":     "snb",
-        "available":  False,
-        "fetched_at": datetime.utcnow().isoformat(),
-        "data_type":  "sector_aggregate",
-        "note":       "SNB publishes sector-level data. Individual bank data below CHF 10B threshold is not separately disclosed.",
-    }
-
-    # Total assets of Swiss banking sector
-    bs_data = _fetch_cube(CUBES["balance_sheet_annual"], "2021", "2025")
-    if bs_data:
-        val, date = _parse_latest_observation(bs_data)
-        if val is not None:
-            result["available"]                = True
-            result["sector_total_assets_bn_chf"] = round(float(val) / 1000, 1)  # usually in millions
-            result["sector_as_of"]             = date
-
-    # Capital ratios
-    cap_data = _fetch_cube(CUBES["capital_ratios"], "2021", "2025")
-    if cap_data:
-        val, date = _parse_latest_observation(cap_data)
-        if val is not None:
-            result["available"]                = True
-            result["sector_capital_ratio_pct"] = float(val)
-            result["capital_ratio_date"]       = date
-
-    return result
 
 
 def enrich_counterparty(slug: str, display_name: str = "", jurisdiction: str = "CH") -> dict:
     """
-    Main entry point. Returns SNB statistics for a Swiss bank.
-    SNB publishes sector-level data; individual bank data is only
-    available for systemically important banks (UBS, Credit Suisse, etc.)
-
-    For all other Swiss banks, returns sector benchmarks with a note.
+    Fetch SNB statistics for a Swiss bank.
+    Returns sector benchmark data — individual bank data is not
+    published separately for banks below CHF 10B total assets.
     """
-    if jurisdiction not in ("CH", "Switzerland", "Schweiz"):
+    if jurisdiction not in ("CH", "Switzerland", "Schweiz", "Suisse"):
         return {"source": "snb", "available": False, "reason": "not_swiss"}
 
-    # Get sector stats (always available)
-    stats = get_sector_statistics()
+    result = {
+        "source":     "snb",
+        "available":  False,
+        "fetched_at": datetime.utcnow().isoformat(),
+    }
 
-    if stats.get("available"):
-        stats["note"] = (
-            f"SNB sector-level data for Swiss banking industry. "
-            f"{display_name} reports to SNB but individual institution data "
-            f"is not published separately unless systemically important. "
-            f"Sector benchmark: total assets CHF {stats.get('sector_total_assets_bn_chf', '?')}B, "
-            f"avg capital ratio {stats.get('sector_capital_ratio_pct', '?')}%."
-        )
+    # Try banking statistics (BSTA)
+    bsta = _fetch("BSTA")
+    if not bsta:
+        # Try CSV as fallback
+        bsta = _fetch("BSTA", fmt="csv")
+        if bsta.get("ok"):
+            result["available"]   = True
+            result["data_type"]   = "sector_csv"
+            result["note"]        = f"SNB BSTA sector data available (CSV). {display_name} included in aggregate."
+            return result
+        return result
 
-    return stats
+    result["available"] = True
+    result["data_type"] = "sector_aggregate"
+
+    # Parse the JSON structure — SNB wraps data in various ways
+    # Try observations array
+    obs = (bsta.get("observations") or bsta.get("data") or
+           bsta.get("timeSeries") or bsta.get("rows") or [])
+
+    if isinstance(obs, list) and obs:
+        latest = obs[-1] if isinstance(obs[-1], dict) else {}
+        val = latest.get("value") or latest.get("v") or latest.get("val")
+        if val:
+            try:
+                result["sector_total_assets_chf_bn"] = round(float(val) / 1000, 1)
+            except Exception:
+                result["sector_total_assets_raw"] = val
+        result["sector_as_of"] = latest.get("date") or latest.get("d") or latest.get("period")
+    elif isinstance(bsta, dict):
+        # Top-level values
+        for k in ("totalAssets", "total_assets", "balanceSheet"):
+            if bsta.get(k):
+                result["sector_total_assets_raw"] = bsta[k]
+                break
+
+    # Capital adequacy
+    cap = _fetch("BSEIG")
+    if cap:
+        cap_obs = cap.get("observations") or cap.get("data") or []
+        if isinstance(cap_obs, list) and cap_obs:
+            latest = cap_obs[-1] if isinstance(cap_obs[-1], dict) else {}
+            val = latest.get("value") or latest.get("v")
+            if val:
+                try:
+                    result["sector_capital_ratio_pct"] = round(float(val), 2)
+                except Exception:
+                    pass
+
+    result["note"] = (
+        f"{display_name} is a FINMA-supervised bank included in Swiss banking sector "
+        f"aggregate (BSTA). Individual bank data is not separately published by SNB "
+        f"for institutions below CHF 10B total assets threshold."
+    )
+
+    return result

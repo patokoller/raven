@@ -469,7 +469,7 @@ async def get_data_sources(
     Fetch live data from all providers for a counterparty and return
     what each source contributes. Used for the data sources panel.
     """
-    from app.services.providers import defillama, edgar, fca as fca_provider, zefix as zefix_provider, finma as finma_provider, uid_gleif, nansen as nansen_provider, defillama_cex, sanctions as sanctions_provider, regulatory_intelligence as reg_intel
+    from app.services.providers import defillama, edgar, fca as fca_provider, zefix as zefix_provider, finma as finma_provider, uid_gleif, nansen as nansen_provider, defillama_cex, sanctions as sanctions_provider, regulatory_intelligence as reg_intel, snb as snb_provider
 
     cp = (
         supabase.table("counterparties")
@@ -579,18 +579,14 @@ async def get_data_sources(
                 },
                 "url": "https://www.opensanctions.org/datasets/ch_seco_sanctions/",
             }
-            # SNB
-            snb_d = ri.get("_snb", {})
+            # SNB — direct warehouse API
+            snb_result = snb_provider.enrich_counterparty(cp.get("slug",""), cp.get("display_name",""), cp.get("jurisdiction","CH"))
             sources["snb"] = {
                 "name": "SNB Banking Statistics",
-                "available": bool(snb_d) and ri.get("available", False),
-                "data": {
-                    "total_assets_bn": ri.get("total_assets_chf_bn"),
-                    "capital_ratio_pct": ri.get("capital_ratio_pct"),
-                    "credit_rating": ri.get("credit_rating"),
-                    "notes": ri.get("data_notes"),
-                },
-                "url": "https://data.snb.ch/en/topics/banken",
+                "available": snb_result.get("available", False),
+                "data": {k: v for k, v in snb_result.items()
+                         if k not in ("source","available","fetched_at","reason") and v} if snb_result.get("available") else {},
+                "url": "https://data.snb.ch/en/warehouse/BSTA/json",
             }
         # EBA
         if is_eu:
