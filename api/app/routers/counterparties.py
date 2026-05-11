@@ -469,7 +469,7 @@ async def get_data_sources(
     Fetch live data from all providers for a counterparty and return
     what each source contributes. Used for the data sources panel.
     """
-    from app.services.providers import defillama, edgar, fca as fca_provider, zefix as zefix_provider, finma as finma_provider, uid_gleif, nansen as nansen_provider, defillama_cex, sanctions as sanctions_provider, seco as seco_provider, snb as snb_provider, eba as eba_provider
+    from app.services.providers import defillama, edgar, fca as fca_provider, zefix as zefix_provider, finma as finma_provider, uid_gleif, nansen as nansen_provider, defillama_cex, sanctions as sanctions_provider, regulatory_intelligence as reg_intel
 
     cp = (
         supabase.table("counterparties")
@@ -542,44 +542,70 @@ async def get_data_sources(
         "url": "https://ofac.treasury.gov/sanctions-list-service",
     }
 
-    # SECO Swiss Sanctions (CH-specific)
-    if cp.get("jurisdiction") == "CH" or "FINMA" in (cp.get("regulator","").upper()):
-        seco_result = seco_provider.screen(cp.get("display_name",""), cp.get("legal_name"))
-        sources["seco"] = {
-            "name": "SECO Swiss Sanctions",
-            "available": seco_result.get("available", False),
-            "data": {
-                "screened": seco_result.get("screened"),
-                "match": seco_result.get("match", False),
-                "matched_entry": seco_result.get("matched_entry"),
-                "screened_at": seco_result.get("screened_at"),
-            },
-            "url": "https://www.seco.admin.ch/seco/en/home/Aussenwirtschaftspolitik_Wirtschaftliche_Zusammenarbeit/Wirtschaftsbeziehungen/exportkontrollen-und-sanktionen/sanktionen-embargos.html",
-        }
-
-    # SNB Banking Statistics (Swiss banks)
-    if cp.get("jurisdiction") == "CH" or "FINMA" in (cp.get("regulator","").upper()):
-        snb_result = snb_provider.enrich_counterparty(cp.get("slug",""), cp.get("display_name",""), cp.get("jurisdiction","CH"))
-        sources["snb"] = {
-            "name": "SNB Banking Statistics",
-            "available": snb_result.get("available", False),
-            "data": {k: v for k, v in snb_result.items()
-                     if k not in ("source","available","fetched_at") and v is not None} if snb_result.get("available") else {},
-            "url": "https://data.snb.ch/en/topics/banken",
-        }
-
-    # EBA Register (EU/EEA entities)
+    # Regulatory Intelligence (FINMA, SECO, SNB, EBA, GLEIF via Claude web search)
     EU_EEA = {"AT","BE","BG","HR","CY","CZ","DK","EE","FI","FR","DE","GR",
                "HU","IS","IE","IT","LV","LI","LT","LU","MT","NL","NO","PL",
                "PT","RO","SK","SI","ES","SE"}
-    if cp.get("jurisdiction","") in EU_EEA:
-        eba_result = eba_provider.enrich_counterparty(cp.get("slug",""), cp.get("display_name",""), cp.get("jurisdiction",""))
-        sources["eba"] = {
-            "name": "EBA Register of Institutions",
-            "available": eba_result.get("available", False),
-            "data": {k: v for k, v in eba_result.items()
-                     if k not in ("source","available","fetched_at","reason") and v is not None} if eba_result.get("available") else {},
-            "url": eba_result.get("eba_url", "https://registers.eba.europa.eu/solrweb/public"),
+    jur = cp.get("jurisdiction", "")
+    is_swiss = jur == "CH" or "FINMA" in cp.get("regulator","").upper()
+    is_eu    = jur in EU_EEA
+
+    if is_swiss or is_eu:
+        if is_swiss:
+            ri = reg_intel.enrich_swiss_entity(cp.get("slug",""), cp.get("display_name",""), cp.get("entity_type",""))
+        else:
+            ri = reg_intel.enrich_eu_entity(cp.get("slug",""), cp.get("display_name",""), jur, cp.get("entity_type",""))
+
+        # FINMA
+        if is_swiss:
+            sources["finma"] = {
+                "name": "FINMA Supervised Institutions",
+                "available": ri.get("available", False) and ri.get("finma_supervised", False),
+                "data": ri.get("_finma", {}),
+                "url": ri.get("finma_url", "https://www.finma.ch/en/authorisation/supervised-institutions/"),
+            }
+            # SECO
+            seco = ri.get("_seco", {})
+            sources["seco"] = {
+                "name": "SECO Swiss Sanctions",
+                "available": ri.get("available", False),
+                "data": {
+                    "screened": seco.get("available", False),
+                    "match": seco.get("match", False),
+                    "screened_at": seco.get("screened_at"),
+                    "result": "CLEAR" if not seco.get("match") else "MATCH",
+                },
+                "url": "https://www.seco.admin.ch/seco/en/home/Aussenwirtschaftspolitik_Wirtschaftliche_Zusammenarbeit/Wirtschaftsbeziehungen/exportkontrollen-und-sanktionen/sanktionen-embargos.html",
+            }
+            # SNB
+            snb_d = ri.get("_snb", {})
+            sources["snb"] = {
+                "name": "SNB Banking Statistics",
+                "available": bool(snb_d) and ri.get("available", False),
+                "data": {
+                    "total_assets_bn": ri.get("total_assets_chf_bn"),
+                    "capital_ratio_pct": ri.get("capital_ratio_pct"),
+                    "credit_rating": ri.get("credit_rating"),
+                    "notes": ri.get("data_notes"),
+                },
+                "url": "https://data.snb.ch/en/topics/banken",
+            }
+        # EBA
+        if is_eu:
+            eba_d = ri.get("_eba", {})
+            sources["eba"] = {
+                "name": "EBA Register of Institutions",
+                "available": bool(eba_d) and ri.get("available", False),
+                "data": eba_d,
+                "url": "https://registers.eba.europa.eu/solrweb/public",
+            }
+        # GLEIF
+        gleif_d = ri.get("_gleif", {})
+        sources["gleif"] = {
+            "name": "GLEIF LEI Register",
+            "available": bool(gleif_d.get("lei")),
+            "data": gleif_d,
+            "url": gleif_d.get("url", "https://search.gleif.org"),
         }
 
     # Nansen (on-chain intelligence)
