@@ -131,15 +131,36 @@ def _get_institutions() -> list:
         if (datetime.utcnow() - entry["ts"]).seconds < _CACHE_TTL:
             return entry["data"]
 
-    data = _download_xlsx()
-    if data:
-        institutions = _parse_xlsx(data)
-        if institutions:
-            _CACHE["institutions"] = {"data": institutions, "ts": datetime.utcnow()}
-            print(f"[finma] Loaded {len(institutions)} institutions from Excel")
-            return institutions
+    # Non-blocking: if download takes too long, return empty and retry later
+    import threading
+    if _CACHE.get("_downloading"):
+        return _CACHE.get("institutions", {}).get("data", [])
+
+    _CACHE["_downloading"] = True
+    try:
+        data = _download_xlsx()
+        if data:
+            institutions = _parse_xlsx(data)
+            # Free the raw bytes immediately after parsing
+            del data
+            if institutions:
+                _CACHE["institutions"] = {"data": institutions, "ts": datetime.utcnow()}
+                print(f"[finma] Loaded {len(institutions)} institutions from Excel")
+                _CACHE["_downloading"] = False
+                return institutions
+    except Exception as e:
+        print(f"[finma] Institution load error: {e}")
+    finally:
+        _CACHE["_downloading"] = False
 
     return _CACHE.get("institutions", {}).get("data", [])
+
+
+def preload_async():
+    """Preload FINMA Excel in a background thread at startup."""
+    import threading
+    t = threading.Thread(target=_get_institutions, daemon=True)
+    t.start()
 
 
 def _find_institution(display_name: str, slug: str = "") -> Optional[dict]:

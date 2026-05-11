@@ -566,9 +566,15 @@ async def get_data_sources(
     if is_swiss:
         # FINMA — direct Excel download from finma.ch/en/.../beh.xlsx
         try:
-            finma_result = finma_provider.enrich_counterparty(
-                cp.get("slug",""), cp.get("display_name","")
-            )
+            import concurrent.futures as _cf
+            with _cf.ThreadPoolExecutor(max_workers=1) as _ex:
+                _fut = _ex.submit(finma_provider.enrich_counterparty,
+                                  cp.get("slug",""), cp.get("display_name",""))
+                try:
+                    finma_result = _fut.result(timeout=8)
+                except _cf.TimeoutError:
+                    print("[data_sources] FINMA timeout - using cache or skip")
+                    finma_result = {"available": False, "reason": "timeout"}
         except Exception as _e:
             print(f"[data_sources] FINMA error: {_e}")
             finma_result = {"available": False}
