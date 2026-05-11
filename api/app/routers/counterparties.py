@@ -550,60 +550,78 @@ async def get_data_sources(
     is_swiss = jur == "CH" or "FINMA" in cp.get("regulator","").upper()
     is_eu    = jur in EU_EEA
 
-    if is_swiss or is_eu:
-        if is_swiss:
-            ri = reg_intel.enrich_swiss_entity(cp.get("slug",""), cp.get("display_name",""), cp.get("entity_type",""))
-        else:
-            ri = reg_intel.enrich_eu_entity(cp.get("slug",""), cp.get("display_name",""), jur, cp.get("entity_type",""))
+    if is_swiss:
+        # FINMA — direct Excel download from finma.ch/en/.../beh.xlsx
+        finma_result = finma_provider.enrich_counterparty(
+            cp.get("slug",""), cp.get("display_name","")
+        )
+        sources["finma"] = {
+            "name": "FINMA Supervised Institutions",
+            "available": finma_result.get("available", False),
+            "data": {k: v for k, v in finma_result.items()
+                     if k not in ("source","available","fetched_at","reason","xlsx_url") and v
+                    } if finma_result.get("available") else {},
+            "url": "https://www.finma.ch/en/finma-public/authorised-institutions-individuals-and-products/",
+        }
 
-        # FINMA
-        if is_swiss:
-            sources["finma"] = {
-                "name": "FINMA Supervised Institutions",
-                "available": ri.get("available", False) and ri.get("finma_supervised", False),
-                "data": ri.get("_finma", {}),
-                "url": ri.get("finma_url", "https://www.finma.ch/en/authorisation/supervised-institutions/"),
-            }
-            # SECO
-            seco = ri.get("_seco", {})
-            sources["opensanctions_ch"] = {
-                "name": "OpenSanctions (SECO CH)",
-                "available": ri.get("available", False) and seco.get("available", False),
-                "data": {
-                    "dataset": "ch_seco_sanctions",
-                    "match": seco.get("match", False),
-                    "score": seco.get("score"),
-                    "matched_name": seco.get("matched_name"),
-                    "screened_at": seco.get("screened_at"),
-                    "result": "CLEAR" if not seco.get("match") else "MATCH - REVIEW REQUIRED",
-                },
-                "url": "https://www.opensanctions.org/datasets/ch_seco_sanctions/",
-            }
-            # SNB — direct warehouse API
-            snb_result = snb_provider.enrich_counterparty(cp.get("slug",""), cp.get("display_name",""), cp.get("jurisdiction","CH"))
-            sources["snb"] = {
-                "name": "SNB Banking Statistics",
-                "available": snb_result.get("available", False),
-                "data": {k: v for k, v in snb_result.items()
-                         if k not in ("source","available","fetched_at","reason") and v} if snb_result.get("available") else {},
-                "url": "https://data.snb.ch/en/warehouse/BSTA/json",
-            }
-        # EBA
-        if is_eu:
-            eba_d = ri.get("_eba", {})
-            sources["eba"] = {
-                "name": "EBA Register of Institutions",
-                "available": bool(eba_d) and ri.get("available", False),
-                "data": eba_d,
-                "url": "https://registers.eba.europa.eu/solrweb/public",
-            }
-        # GLEIF
-        gleif_d = ri.get("_gleif", {})
+        # OpenSanctions — ch_seco_sanctions dataset
+        from app.services.providers import seco as seco_provider
+        seco_result = seco_provider.screen(
+            cp.get("display_name",""), cp.get("legal_name")
+        )
+        sources["opensanctions_ch"] = {
+            "name": "OpenSanctions (SECO CH)",
+            "available": seco_result.get("available", False),
+            "data": {
+                "dataset":      "ch_seco_sanctions",
+                "result":       "CLEAR" if not seco_result.get("match") else "MATCH - REVIEW REQUIRED",
+                "match":        seco_result.get("match", False),
+                "score":        seco_result.get("score"),
+                "matched_name": seco_result.get("matched_name"),
+                "method":       seco_result.get("method"),
+                "screened_at":  seco_result.get("screened_at"),
+            },
+            "url": "https://www.opensanctions.org/datasets/ch_seco_sanctions/",
+        }
+
+        # SNB Banking Statistics — direct warehouse API
+        snb_result = snb_provider.enrich_counterparty(
+            cp.get("slug",""), cp.get("display_name",""), cp.get("jurisdiction","CH")
+        )
+        sources["snb"] = {
+            "name": "SNB Banking Statistics",
+            "available": snb_result.get("available", False),
+            "data": {k: v for k, v in snb_result.items()
+                     if k not in ("source","available","fetched_at","reason") and v
+                    } if snb_result.get("available") else {},
+            "url": "https://data.snb.ch/en/warehouse/BSTA/json",
+        }
+
+    if is_eu:
+        # EBA Register — direct API
+        from app.services.providers import eba as eba_provider
+        eba_result = eba_provider.enrich_counterparty(
+            cp.get("slug",""), cp.get("display_name",""), jur
+        )
+        sources["eba"] = {
+            "name": "EBA Register of Institutions",
+            "available": eba_result.get("available", False),
+            "data": {k: v for k, v in eba_result.items()
+                     if k not in ("source","available","fetched_at","reason") and v
+                    } if eba_result.get("available") else {},
+            "url": "https://registers.eba.europa.eu/solrweb/public",
+        }
+
+    if is_swiss or is_eu:
+        # GLEIF — direct REST API (no auth)
+        gleif_result = uid_gleif.enrich_gleif(cp.get("slug",""), cp.get("display_name",""), jur)
         sources["gleif"] = {
             "name": "GLEIF LEI Register",
-            "available": bool(gleif_d.get("lei")),
-            "data": gleif_d,
-            "url": gleif_d.get("url", "https://search.gleif.org"),
+            "available": gleif_result.get("available", False),
+            "data": {k: v for k, v in gleif_result.items()
+                     if k not in ("source","available","fetched_at") and v
+                    } if gleif_result.get("available") else {},
+            "url": gleif_result.get("gleif_url", "https://search.gleif.org"),
         }
 
     # Nansen (on-chain intelligence)
