@@ -1,118 +1,114 @@
 """
 Raven — DefiLlama CEX Transparency Provider
 
-DefiLlama tracks exchange proof-of-reserves by monitoring wallets
-that exchanges publicly disclose. Free, no API key, updated daily.
+DefiLlama tracks CEX proof-of-reserves as protocol TVL.
+Correct endpoint: GET https://api.llama.fi/protocol/{cex-slug}
 
-Covers: Binance, Coinbase, Kraken, OKX, Bybit, Bitfinex, Gemini,
-Bitstamp, Deribit, CEX.IO, and 40+ more exchanges.
+CEX slugs (confirmed from DefiLlama):
+  binance-cex, coinbase-cex, kraken-cex, okx-cex, bybit-cex,
+  gemini-cex, bitfinex, bitstamp, deribit, crypto-com, gate-io
 
-Data provided:
-- Total assets (TVL) in USD
-- Asset breakdown (BTC, ETH, stablecoins, other)
-- 7d and 30d change in reserves
-- Whether PoR is audited and by whom
-- Clean assets (excludes self-issued tokens like FTT)
-
-This replaces our fragile hardcoded wallet address approach.
+No API key required.
 """
 
 import httpx
 from typing import Optional
 from datetime import datetime
 
-DEFILLAMA_BASE = "https://api.llama.fi"
-
-# DefiLlama protocol slugs for CEX entities
-# Format: {our_slug}: {defillama_protocol_slug}
-CEX_SLUGS = {
-    "binance":         "binance",
-    "coinbase":        "coinbase",
-    "coinbase-custody": "coinbase",
-    "kraken":          "kraken",
-    "okx":             "okx",
-    "bybit":           "bybit",
-    "bitfinex":        "bitfinex",
-    "gemini":          "gemini",
-    "bitstamp":        "bitstamp",
-    "deribit":         "deribit",
-    "cex-io":          "cex-io",
-    "crypto-com":      "crypto-com",
-    "gate-io":         "gate-io",
-    "huobi":           "huobi",
-    "kucoin":          "kucoin",
-    "lmax-digital":    None,  # not tracked by DefiLlama
-}
-
+BASE    = "https://api.llama.fi"
 HEADERS = {
-    "User-Agent": "Raven Risk Intelligence / contact@raven.internal",
+    "User-Agent": "Raven Risk Intelligence / raven.internal",
     "Accept":     "application/json",
 }
+
+CEX_SLUGS = {
+    "binance":          "binance-cex",
+    "coinbase":         "coinbase-cex",
+    "coinbase-custody": "coinbase-cex",
+    "kraken":           "kraken-cex",
+    "okx":              "okx-cex",
+    "bybit":            "bybit-cex",
+    "gemini":           "gemini-cex",
+    "bitfinex":         "bitfinex",
+    "bitstamp":         "bitstamp",
+    "deribit":          "deribit",
+    "crypto-com":       "crypto-com",
+    "gate-io":          "gate-io",
+    "huobi":            "huobi",
+    "kucoin":           "kucoin",
+    "lmax-digital":     None,
+}
+
+
+def _classify_quality(total: float, btc: float, eth: float, stable: float) -> str:
+    if total == 0:
+        return "unknown"
+    native_pct = (btc + eth) / total
+    stable_pct = stable / total
+    if native_pct >= 0.6:
+        return "high_native"
+    if stable_pct >= 0.5:
+        return "stablecoin_heavy"
+    if stable_pct + native_pct >= 0.7:
+        return "diversified"
+    return "mixed"
+
+
+def _classify_trend(change: Optional[float]) -> str:
+    if change is None:
+        return "unknown"
+    if change > 0.10:
+        return "increasing"
+    if change > -0.10:
+        return "stable"
+    if change > -0.30:
+        return "declining"
+    return "critical_outflow"
 
 
 def get_cex_reserves(slug: str) -> Optional[dict]:
     """
-    Fetch CEX proof-of-reserves data from DefiLlama.
-    Returns total assets, breakdown, and 30d trend.
+    Fetch CEX reserves via GET /protocol/{cex-slug}.
+    Returns total assets, token breakdown, 30d trend.
     """
     dl_slug = CEX_SLUGS.get(slug)
     if not dl_slug:
         return None
 
-    # Try the CEX-specific endpoint first, then protocol fallback
-    data = None
-    for url in [
-        f"{DEFILLAMA_BASE}/cexs/{dl_slug}",
-        f"{DEFILLAMA_BASE}/protocol/{dl_slug}",
-    ]:
-        try:
-            r = httpx.get(url, headers=HEADERS, timeout=12)
-            if r.status_code == 200:
-                data = r.json()
-                break
-            print(f"[defillama_cex] {url}: HTTP {r.status_code}")
-        except Exception as e:
-            print(f"[defillama_cex] {url}: {e}")
-
-    if not data:
-        return None
-
     try:
-        pass  # data already assigned above
+        r = httpx.get(f"{BASE}/protocol/{dl_slug}", headers=HEADERS, timeout=15)
+        if r.status_code != 200:
+            print(f"[defillama_cex] /protocol/{dl_slug}: HTTP {r.status_code}")
+            return None
 
-        # Current TVL (total reserves)
-        tvl_current = data.get("currentChainTvls", {})
-        total_tvl   = sum(float(v) for v in tvl_current.values()) if tvl_current else 0
+        data = r.json()
 
-        if not total_tvl and data.get("tvl"):
-            tvl_history = data["tvl"]
-            if isinstance(tvl_history, list) and tvl_history:
-                total_tvl = float(tvl_history[-1].get("totalLiquidityUSD", 0))
+        # Total reserves (TVL for CEX = proof of reserves)
+        chain_tvls = data.get("currentChainTvls", {})
+        total_tvl  = sum(float(v) for v in chain_tvls.values()) if chain_tvls else 0
+        if not total_tvl:
+            tvl_arr = data.get("tvl", [])
+            if isinstance(tvl_arr, list) and tvl_arr:
+                total_tvl = float(tvl_arr[-1].get("totalLiquidityUSD", 0))
 
-        # Token breakdown for reserve quality assessment
-        tokens = data.get("tokensInUsd", [])
-        latest_tokens = tokens[-1].get("tokens", {}) if tokens else {}
+        # 30d trend
+        tvl_history = data.get("tvl", [])
+        change_30d  = None
+        if isinstance(tvl_history, list) and len(tvl_history) >= 30:
+            cur  = float(tvl_history[-1].get("totalLiquidityUSD", 0))
+            past = float(tvl_history[-30].get("totalLiquidityUSD", 0))
+            if past > 0:
+                change_30d = (cur - past) / past
+
+        # Token composition for reserve quality
+        tokens_hist   = data.get("tokensInUsd", [])
+        latest_tokens = tokens_hist[-1].get("tokens", {}) if tokens_hist else {}
 
         btc_usd    = float(latest_tokens.get("BTC", 0) or latest_tokens.get("WBTC", 0) or 0)
         eth_usd    = float(latest_tokens.get("ETH", 0) or latest_tokens.get("WETH", 0) or 0)
         stable_usd = sum(float(latest_tokens.get(s, 0) or 0)
-                        for s in ["USDT", "USDC", "DAI", "BUSD", "FDUSD", "TUSD"])
+                         for s in ("USDT", "USDC", "DAI", "BUSD", "FDUSD", "TUSD", "USDE"))
         other_usd  = max(0, total_tvl - btc_usd - eth_usd - stable_usd)
-
-        # 30d trend from TVL history
-        tvl_history = data.get("tvl", [])
-        change_30d  = None
-        if isinstance(tvl_history, list) and len(tvl_history) >= 30:
-            current  = float(tvl_history[-1].get("totalLiquidityUSD", 0))
-            past_30d = float(tvl_history[-30].get("totalLiquidityUSD", 0))
-            if past_30d > 0:
-                change_30d = (current - past_30d) / past_30d
-
-        # Reserve quality from asset composition
-        quality = _classify_quality(total_tvl, btc_usd, eth_usd, stable_usd)
-
-        # Reserve trend from 30d change
-        trend = _classify_trend(change_30d)
 
         return {
             "source":           "defillama_cex",
@@ -122,50 +118,30 @@ def get_cex_reserves(slug: str) -> Optional[dict]:
             "stable_usd":       stable_usd,
             "other_usd":        other_usd,
             "change_30d_pct":   change_30d,
-            "reserve_quality":  quality,
-            "reserve_trend":    trend,
+            "reserve_quality":  _classify_quality(total_tvl, btc_usd, eth_usd, stable_usd),
+            "reserve_trend":    _classify_trend(change_30d),
             "dl_slug":          dl_slug,
             "dl_url":           f"https://defillama.com/cex/{slug}",
             "fetched_at":       datetime.utcnow().isoformat(),
         }
-
     except Exception as e:
-        print(f"[defillama_cex] Error for {slug}: {e}")
-        return None
-
-
-def _classify_quality(total: float, btc: float, eth: float, stable: float) -> str:
-    if total <= 0:
-        return "unknown"
-    quality_pct = (btc + eth + stable) / total
-    if quality_pct >= 0.70:
-        return "high"
-    elif quality_pct >= 0.50:
-        return "medium"
-    return "low"
-
-
-def _classify_trend(change_30d: Optional[float]) -> str:
-    if change_30d is None:
-        return "stable"
-    if change_30d > 0.10:
-        return "increasing"
-    elif change_30d < -0.30:
-        return "critical_outflow"
-    elif change_30d < -0.10:
-        return "declining"
-    return "stable"
+        print(f"[defillama_cex] {slug} error: {e}")
+    return None
 
 
 def enrich_counterparty(slug: str) -> dict:
-    """Main entry point for CEX reserve enrichment."""
+    """Main entry point for CEX data."""
     data = get_cex_reserves(slug)
     if not data:
         return {"source": "defillama_cex", "available": False}
 
-    return {
-        **data,
+    result = {
         "available":                  True,
-        "onchain_reserve_trend_30d":  data["reserve_trend"],
+        "total_assets_usd":           data["total_assets_usd"],
         "reserve_quality":            data["reserve_quality"],
+        "onchain_reserve_trend_30d":  data["reserve_trend"],
+        "change_30d_pct":             data["change_30d_pct"],
+        "dl_url":                     data["dl_url"],
+        "source":                     "defillama_cex",
     }
+    return result
