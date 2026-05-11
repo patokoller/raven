@@ -254,40 +254,29 @@ class EnrichmentData(BaseModel):
 
 
 
-@router.patch("/{counterparty_id}")
 @router.post("/{counterparty_id}/update")
 async def update_counterparty(
     counterparty_id: UUID,
     body: dict,
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    """Update counterparty fields. Accepts PATCH or POST /update."""
+    """Update counterparty fields."""
     allowed = {"display_name","legal_name","entity_type","jurisdiction",
                "regulator","license_number","website","notes"}
     update = {k: v for k, v in body.items() if k in allowed and v is not None}
     if not update:
         raise HTTPException(status_code=400, detail="No valid fields to update")
-
-    r = supabase.table("counterparties").update(update)         .eq("counterparty_id", str(counterparty_id)).execute()
-    if not r.data:
-        raise HTTPException(status_code=404, detail="Counterparty not found")
-
+    supabase.table("counterparties").update(update)         .eq("counterparty_id", str(counterparty_id)).execute()
     return {"status": "updated", "counterparty_id": str(counterparty_id)}
 
 
-@router.delete("/{counterparty_id}")
 @router.post("/{counterparty_id}/delete")
 async def delete_counterparty(
     counterparty_id: UUID,
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    """Soft-delete a counterparty. Accepts DELETE or POST /delete."""
-    r = supabase.table("counterparties").select("counterparty_id,slug")         .eq("counterparty_id", str(counterparty_id)).execute()
-    if not r.data:
-        raise HTTPException(status_code=404, detail="Counterparty not found")
-
+    """Soft-delete a counterparty."""
     supabase.table("counterparties").update({"is_active": False})         .eq("counterparty_id", str(counterparty_id)).execute()
-
     return {"status": "deleted", "counterparty_id": str(counterparty_id)}
 
 
