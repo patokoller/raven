@@ -59,9 +59,11 @@ LEGAL_FORMS = {
 }
 
 
-def _auth() -> tuple:
-    """Return Basic Auth credentials tuple."""
-    return (settings.ZEFIX_USERNAME, settings.ZEFIX_PASSWORD)
+def _auth():
+    """Return Basic Auth credentials tuple, or None if not configured."""
+    if settings.ZEFIX_USERNAME and settings.ZEFIX_PASSWORD:
+        return (settings.ZEFIX_USERNAME, settings.ZEFIX_PASSWORD)
+    return None
 
 
 def _headers() -> dict:
@@ -121,22 +123,30 @@ def get_company_by_uid(uid: str) -> Optional[dict]:
         f"{ZEFIX_BASE}/company/uid/CHE{uid_numeric}",
     ]
 
+    auth = _auth()
     for url in urls_to_try:
-        try:
-            r = httpx.get(url, auth=_auth(), headers=_headers(), timeout=12)
-            if r.status_code == 200:
-                data = r.json()
-                # Zefix returns a list of companies for UID lookup — take first
-                if isinstance(data, list):
-                    return data[0] if data else None
-                return data
-            elif r.status_code == 401:
-                print(f"[zefix] Auth failed — check ZEFIX_USERNAME/PASSWORD")
-                return None
-        except Exception as e:
-            print(f"[zefix] UID lookup error {url}: {e}")
+        # Try without auth first (UID lookup is public on Zefix)
+        # then with auth if credentials available
+        for attempt_auth in ([None, auth] if auth else [None]):
+            try:
+                r = httpx.get(url, auth=attempt_auth, headers=_headers(), timeout=12)
+                if r.status_code == 200:
+                    data = r.json()
+                    if isinstance(data, list):
+                        return data[0] if data else None
+                    return data
+                elif r.status_code == 401:
+                    if attempt_auth is None and auth:
+                        continue  # retry with auth
+                    print(f"[zefix] Auth failed for {url}")
+                    break
+                elif r.status_code == 404:
+                    break  # try next URL format
+            except Exception as e:
+                print(f"[zefix] UID lookup error {url}: {e}")
+                break
 
-    print(f"[zefix] UID {uid} not found in any format")
+    print(f"[zefix] UID {uid} not found")
     return None
 
 
