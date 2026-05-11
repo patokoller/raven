@@ -35,7 +35,11 @@ async def list_counterparties(
     # Simple query — no complex joins that can fail
     q = (
         supabase.table("counterparties")
-        .select("*")
+        .select(
+            "counterparty_id,slug,display_name,entity_type,jurisdiction,"
+            "regulator,current_risk_tier,latest_score_id,research_status,"
+            "last_enriched_at,website,legal_name,is_active"
+        )
         .eq("tenant_id", settings.DEFAULT_TENANT_ID)
         .eq("is_active", is_active)
     )
@@ -43,6 +47,13 @@ async def list_counterparties(
         q = q.eq("entity_type", entity_type)
     if risk_tier:
         q = q.eq("current_risk_tier", risk_tier)
+
+    # Check cache (30s TTL — reduces DB load on rapid page refreshes)
+    from main import _cache_get, _cache_set
+    cache_key = f"cp_list_{settings.DEFAULT_TENANT_ID}_{entity_type}_{risk_tier}_{is_active}"
+    cached = _cache_get(cache_key, ttl=30)
+    if cached is not None:
+        return cached
 
     cps = q.order("display_name").execute().data
 
@@ -81,6 +92,7 @@ async def list_counterparties(
             "latest_score": score if score else None,
         })
 
+    _cache_set(cache_key, result)
     return result
 
 

@@ -54,6 +54,18 @@ app.include_router(admin.router,           prefix="/api/v1/admin",           tag
 app.include_router(regulations.router,     prefix="/api/v1/regulations",     tags=["Regulations"])
 
 
+# Simple in-memory response cache — reduces DB load on repeated reads
+import time as _time
+_RESPONSE_CACHE: dict = {}
+def _cache_get(key: str, ttl: int = 30):
+    entry = _RESPONSE_CACHE.get(key)
+    if entry and _time.time() - entry["ts"] < ttl:
+        return entry["data"]
+    return None
+def _cache_set(key: str, data):
+    _RESPONSE_CACHE[key] = {"data": data, "ts": _time.time()}
+
+
 @app.get("/health", tags=["Health"])
 async def health():
     return {"status": "ok", "service": "raven-api", "version": "0.1.0"}
