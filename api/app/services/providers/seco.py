@@ -1,104 +1,185 @@
 """
 Raven — SECO Swiss Sanctions Provider
-State Secretariat for Economic Affairs (Staatssekretariat für Wirtschaft)
+Uses OpenSanctions API (opensanctions.org) which aggregates the SECO
+Swiss Sanctions/Embargoes list and provides a proper matching API.
 
-Screens counterparties against Swiss domestic sanctions lists which differ
-from OFAC/EU in some cases — particularly regarding Russia/Belarus measures
-and Swiss autonomous measures not mirrored in EU lists.
+API: https://api.opensanctions.org/match/ch_seco_sanctions
+POST with JSON body: {"queries": {"q1": {"schema": "LegalEntity", "properties": {"name": ["..."]} }}}
+Requires API key for commercial use.
 
-Sources:
-- SECO Consolidated Sanctions List (XML, updated daily)
-  https://www.seco.admin.ch/seco/en/home/Aussenwirtschaftspolitik_Wirtschaftliche_Zusammenarbeit/Wirtschaftsbeziehungen/exportkontrollen-und-sanktionen/sanktionen-embargos.html
-- SECO also enforces UN and EU sanctions in Switzerland
-
-No API key required. Public data.
+Bulk download fallback (no auth): 
+https://data.opensanctions.org/datasets/latest/ch_seco_sanctions/names.txt
 """
 
 import httpx
 import re
 from datetime import datetime
-from functools import lru_cache
+from app.core.config import settings
 
-SECO_LIST_URL = "https://www.seco.admin.ch/dam/seco/de/dokumente/Aussenwirtschaft/Wirtschaftliche_Landesversorgung/Embargos/Sanktionsmassnahmen/Sanktionen_konsolidierte_Liste.xml.download.xml/Sanctions_Consolidated_List.xml"
+OPENSANCTIONS_MATCH  = "https://api.opensanctions.org/match/ch_seco_sanctions"
+OPENSANCTIONS_SEARCH = "https://api.opensanctions.org/search/ch_seco_sanctions"
+NAMES_TXT_URL        = "https://data.opensanctions.org/datasets/latest/ch_seco_sanctions/names.txt"
 
-_CACHE: dict = {}
+_NAMES_CACHE: dict = {}
 _CACHE_TTL = 3600 * 24  # 24h
 
-HEADERS = {
-    "User-Agent": "Raven Risk Intelligence / raven.internal",
-    "Accept": "application/xml, text/xml, */*",
-}
+
+def _get_api_headers() -> dict:
+    headers = {"Accept": "application/json", "User-Agent": "Raven Risk Intelligence / raven.internal"}
+    api_key = getattr(settings, "OPENSANCTIONS_API_KEY", None)
+    if api_key:
+        headers["Authorization"] = f"ApiKey {api_key}"
+    return headers
 
 
-def _get_seco_list() -> str:
-    """Fetch and cache SECO sanctions list XML."""
-    cache_key = "seco_list"
-    if cache_key in _CACHE:
-        entry = _CACHE[cache_key]
+def _screen_via_api(name: str, legal_name: str = None) -> dict:
+    """Use OpenSanctions match API (preferred — requires API key for commercial use)."""
+    names = [n for n in [name, legal_name] if n]
+    body = {
+        "queries": {
+            "q1": {
+                "schema": "LegalEntity",
+                "properties": {"name": names},
+            }
+        }
+    }
+    r = httpx.post(
+        OPENSANCTIONS_MATCH,
+        json=body,
+        headers=_get_api_headers(),
+        timeout=15,
+    )
+    if r.status_code == 200:
+        data   = r.json()
+        result = data.get("responses", {}).get("q1", {})
+        hits   = result.get("results", [])
+        if hits:
+            top = hits[0]
+            score = top.get("score", 0)
+            # OpenSanctions score >0.7 = likely match
+            if score > 0.5:
+                return {
+                    "source":        "seco_opensanctions",
+                    "available":     True,
+                    "match":         score > 0.7,
+                    "score":         score,
+                    "matched_name":  top.get("caption"),
+                    "entity_id":     top.get("id"),
+                    "topics":        top.get("properties", {}).get("topics", []),
+                    "screened_at":   datetime.utcnow().isoformat(),
+                }
+        return {
+            "source": "seco_opensanctions", "available": True,
+            "match": False, "score": 0,
+            "screened_at": datetime.utcnow().isoformat(),
+        }
+    return {}
+
+
+def _screen_via_search(name: str) -> dict:
+    """Use OpenSanctions search endpoint (free, less precise)."""
+    r = httpx.get(
+        OPENSANCTIONS_SEARCH,
+        params={"q": name, "limit": 5},
+        headers=_get_api_headers(),
+        timeout=12,
+    )
+    if r.status_code == 200:
+        data    = r.json()
+        results = data.get("results", [])
+        for hit in results:
+            caption = (hit.get("caption") or "").lower()
+            if name.lower() in caption or caption in name.lower():
+                return {
+                    "source":       "seco_opensanctions",
+                    "available":    True,
+                    "match":        True,
+                    "matched_name": hit.get("caption"),
+                    "screened_at":  datetime.utcnow().isoformat(),
+                }
+        return {
+            "source": "seco_opensanctions", "available": True,
+            "match": False, "screened_at": datetime.utcnow().isoformat(),
+        }
+    return {}
+
+
+def _screen_via_bulk(name: str) -> dict:
+    """Fallback: download names.txt bulk file and check."""
+    cache_key = "seco_names"
+    if cache_key in _NAMES_CACHE:
+        entry = _NAMES_CACHE[cache_key]
         if (datetime.utcnow() - entry["ts"]).seconds < _CACHE_TTL:
-            return entry["data"]
-    try:
-        r = httpx.get(SECO_LIST_URL, headers=HEADERS, timeout=30, follow_redirects=True)
-        if r.status_code == 200:
-            _CACHE[cache_key] = {"data": r.text, "ts": datetime.utcnow()}
-            return r.text
-    except Exception as e:
-        print(f"[seco] List fetch error: {e}")
-    return ""
+            names_text = entry["data"]
+        else:
+            names_text = None
+    else:
+        names_text = None
 
+    if names_text is None:
+        try:
+            r = httpx.get(NAMES_TXT_URL, timeout=20, follow_redirects=True,
+                          headers={"User-Agent": "Raven Risk Intelligence"})
+            if r.status_code == 200:
+                names_text = r.text
+                _NAMES_CACHE[cache_key] = {"data": names_text, "ts": datetime.utcnow()}
+        except Exception as e:
+            print(f"[seco] Bulk download error: {e}")
+            return {}
 
-def _normalize(name: str) -> str:
-    return re.sub(r"[^a-z0-9]", "", name.lower())
+    if not names_text:
+        return {}
+
+    name_lower = name.lower().strip()
+    lines      = names_text.lower().splitlines()
+    for line in lines:
+        line = line.strip()
+        if len(line) < 4:
+            continue
+        if name_lower in line or (len(name_lower) >= 5 and line in name_lower):
+            return {
+                "source":       "seco_bulk",
+                "available":    True,
+                "match":        True,
+                "matched_name": line,
+                "screened_at":  datetime.utcnow().isoformat(),
+            }
+
+    return {
+        "source": "seco_bulk", "available": True,
+        "match": False, "screened_at": datetime.utcnow().isoformat(),
+    }
 
 
 def screen(entity_name: str, legal_name: str = None) -> dict:
     """
-    Screen an entity against SECO Swiss sanctions list.
-    Returns match details if found.
+    Screen an entity against SECO Swiss sanctions list via OpenSanctions.
+    Tries match API → search API → bulk names.txt fallback.
     """
-    names_to_check = [n for n in [entity_name, legal_name] if n]
-    normalized_checks = [_normalize(n) for n in names_to_check]
+    # Try match API first (most accurate)
+    try:
+        result = _screen_via_api(entity_name, legal_name)
+        if result:
+            return result
+    except Exception as e:
+        print(f"[seco] Match API error: {e}")
 
-    xml = _get_seco_list()
-    if not xml:
-        return {
-            "source": "seco",
-            "available": False,
-            "screened": False,
-            "reason": "list_unavailable",
-            "screened_at": datetime.utcnow().isoformat(),
-        }
+    # Try search endpoint
+    try:
+        result = _screen_via_search(entity_name)
+        if result:
+            return result
+    except Exception as e:
+        print(f"[seco] Search API error: {e}")
 
-    # Extract names from XML — SECO uses <FNAME> and <NAME1> tags
-    all_names_in_list = re.findall(
-        r"<(?:FNAME|NAME1|wholeName|name)>([^<]+)</(?:FNAME|NAME1|wholeName|name)>",
-        xml, re.IGNORECASE
-    )
-    normalized_list = [_normalize(n) for n in all_names_in_list]
-
-    matched = False
-    matched_entry = None
-    for check_norm in normalized_checks:
-        if len(check_norm) < 4:
-            continue
-        for i, list_norm in enumerate(normalized_list):
-            # Substring match (catches partial matches like "Sygnum" in "Sygnum Bank AG")
-            if check_norm in list_norm or list_norm in check_norm:
-                # Require at least 5 chars to reduce false positives
-                overlap = min(len(check_norm), len(list_norm))
-                if overlap >= 5:
-                    matched = True
-                    matched_entry = all_names_in_list[i] if i < len(all_names_in_list) else list_norm
-                    break
-        if matched:
-            break
+    # Fallback: bulk file
+    try:
+        return _screen_via_bulk(entity_name)
+    except Exception as e:
+        print(f"[seco] Bulk fallback error: {e}")
 
     return {
-        "source":      "seco",
-        "available":   True,
-        "screened":    True,
-        "match":       matched,
-        "matched_entry": matched_entry,
+        "source": "seco", "available": False,
+        "reason": "all_methods_failed",
         "screened_at": datetime.utcnow().isoformat(),
-        "list_url":    SECO_LIST_URL,
     }

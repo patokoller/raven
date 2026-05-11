@@ -1,251 +1,196 @@
 """
 Raven — Swiss UID Register + GLEIF LEI Provider
 
-Two complementary sources:
-
-1. UID Register (uid.admin.ch)
-   - Swiss Federal UID (Unternehmens-Identifikationsnummer)
-   - Confirms: VAT registration, active commercial status, NOGA business code
-   - Free REST API, no key required
-   - Endpoint: https://www.uid.admin.ch/Detail.aspx?uid_id={uid}
-   - JSON API: https://www.uid.admin.ch/api/v1/query
+1. Swiss UID Register (uid.admin.ch)
+   Provides: company registration number, VAT status, legal form, activity status
+   API: https://www.uid.admin.ch/app/json/search (POST)
+   No auth required.
 
 2. GLEIF Global LEI Register (gleif.org)
-   - Legal Entity Identifier — global standard for financial institutions
-   - Confirms: legal name, headquarters, entity status, registration authority
-   - Free REST API, no key required
-   - Endpoint: https://api.gleif.org/api/v1/lei-records
-   - Every major financial institution has an LEI
+   Provides: Legal Entity Identifier, registration status, jurisdiction
+   API: https://api.gleif.org/api/v1/lei-records
+   No auth required. Public REST API (JSON:API spec).
+   Docs: https://documenter.getpostman.com/view/7679680/SVYrrxuU
 """
 
 import httpx
 from typing import Optional
 from datetime import datetime
 
-# ── UID Register ──────────────────────────────────────────────
-
-UID_API = "https://www.uid.admin.ch/api/v1"
-
-# NOGA codes relevant to financial services
-NOGA_FINANCIAL = {
-    "6419": "Other monetary intermediation",
-    "6491": "Financial leasing",
-    "6492": "Other credit granting",
-    "6499": "Other financial service activities",
-    "6611": "Administration of financial markets",
-    "6612": "Security and commodity contracts brokerage",
-    "6619": "Other activities auxiliary to financial services",
-    "6630": "Fund management activities",
-    "9900": "Activities of extraterritorial organisations",
-}
-
-# Known UIDs for our counterparties (without CHE- prefix and dots)
-UID_NUMBER_MAP = {
-    "taurus":         "215326827",
-    "bitcoin-suisse": "184974020",
-    "sygnum":         "440296842",
-    "seba-bank":      "222926907",
-    "maerki-baumann": "105913367",
-}
-
-
-def get_uid_details(uid_number: str) -> Optional[dict]:
-    """
-    Fetch company details from Swiss UID register.
-    uid_number: numeric part only, e.g. "215326827"
-    """
-    try:
-        r = httpx.get(
-            f"{UID_API}/uid/{uid_number}",
-            headers={"Accept": "application/json"},
-            timeout=10,
-        )
-        if r.status_code == 200:
-            return r.json()
-    except Exception as e:
-        print(f"[uid] Error for {uid_number}: {e}")
-    return None
-
-
-def search_uid(name: str) -> Optional[str]:
-    """Search UID register by company name, return UID number if found."""
-    try:
-        r = httpx.get(
-            f"{UID_API}/search",
-            params={"name": name, "maxEntries": 5},
-            headers={"Accept": "application/json"},
-            timeout=10,
-        )
-        if r.status_code == 200:
-            results = r.json()
-            if isinstance(results, list) and results:
-                return results[0].get("uidOrganisationId", {}).get("uid")
-    except Exception:
-        pass
-    return None
-
-
-def enrich_uid(slug: str, display_name: str = "") -> dict:
-    """Fetch UID register data for a Swiss counterparty."""
-    uid_num = UID_NUMBER_MAP.get(slug)
-
-    if not uid_num and display_name:
-        uid_num = search_uid(display_name)
-
-    if not uid_num:
-        return {"source": "uid_register", "available": False}
-
-    data = get_uid_details(uid_num)
-    if not data:
-        return {"source": "uid_register", "available": False}
-
-    result = {
-        "source":    "uid_register",
-        "available": True,
-        "fetched_at": datetime.utcnow().isoformat(),
-    }
-
-    # Status
-    status = (data.get("uidEntityStatus") or "").upper()
-    result["uid_status"]      = status
-    result["vat_registered"]  = data.get("vatStatus") == "REGISTERED"
-    result["uid_number"]      = f"CHE-{uid_num[:3]}.{uid_num[3:6]}.{uid_num[6:]}"
-
-    # Active status
-    result["is_commercially_active"] = status in ("ACTIVE", "AKTIV")
-
-    # Business category
-    noga = data.get("noga") or {}
-    noga_code = str(noga.get("code", ""))
-    result["noga_code"]     = noga_code
-    result["business_type"] = NOGA_FINANCIAL.get(noga_code, noga.get("label", ""))
-
-    # Address
-    address = data.get("address", {})
-    result["uid_street"]   = address.get("street")
-    result["uid_city"]     = address.get("city")
-    result["uid_canton"]   = address.get("canton")
-
-    return result
-
-
-# ── GLEIF LEI Register ────────────────────────────────────────
-
+UID_API   = "https://www.uid.admin.ch/app/json"
 GLEIF_API = "https://api.gleif.org/api/v1"
 
-# Known LEIs for our counterparties
-LEI_MAP = {
-    "coinbase":              "549300QK3XBKZX7MZ714",
-    "goldman-sachs-digital": "784F5XWPLTWKTBV3E584",
-    "jpmorgan-onyx":         "8I5DZWZKVSZI1NUHU748",
-    "galaxy-digital":        "2138003FK3J7T9DSV585",
-    "wintermute":            "2138005BQ5K6UHJHXI83",
-    "b2c2":                  "213800XVSCYWTMR2T518",
-    "lmax-digital":          "2138008P0VKWIFZL9Z59",
-    "sygnum":                "9845000A26EE33HCMV29",
-    "seba-bank":             "9845000JXFB29JWVG044",
-    "bitcoin-suisse":        None,  # search
-    "taurus":                None,
-    "maerki-baumann":        None,
-    "anchorage-digital":     None,
-    "copper":                "2138002QEBVZMHVD0B34",
+HEADERS = {
+    "User-Agent": "Raven Risk Intelligence / raven.internal",
+    "Accept":     "application/json",
 }
 
 
-def get_lei_record(lei: str) -> Optional[dict]:
-    """Fetch full LEI record from GLEIF."""
+# ── Swiss UID Register ─────────────────────────────────────────
+
+def enrich_uid(slug: str, display_name: str = "") -> dict:
+    """Search Swiss UID register by company name."""
+    if not display_name and not slug:
+        return {"source": "uid", "available": False}
+
+    search_term = display_name or slug
     try:
-        r = httpx.get(
-            f"{GLEIF_API}/lei-records/{lei}",
-            headers={"Accept": "application/vnd.api+json"},
-            timeout=10,
+        r = httpx.post(
+            f"{UID_API}/search",
+            json={"name": search_term, "maxEntries": 5, "offset": 0},
+            headers=HEADERS,
+            timeout=12,
         )
-        if r.status_code == 200:
-            return r.json().get("data", {})
+        if r.status_code != 200:
+            return {"source": "uid", "available": False}
+
+        data = r.json()
+        entries = data.get("organisations") or data.get("results") or []
+        if not entries:
+            return {"source": "uid", "available": False}
+
+        # Best match
+        best = None
+        name_lower = search_term.lower()
+        for entry in entries:
+            org_name = (entry.get("organisation", {}).get("organisationName", [{}])[0] or {})
+            org_name_str = org_name.get("organisationName", "").lower()
+            if name_lower in org_name_str or org_name_str in name_lower:
+                best = entry
+                break
+        if not best:
+            best = entries[0]
+
+        uid_raw = best.get("uidOrganisationIdCategorie", {}).get("uidOrganisationId", "")
+        is_active = best.get("organisation", {}).get("organisationState") == "A"
+
+        return {
+            "source":    "uid",
+            "available": True,
+            "uid_number": f"CHE-{uid_raw}" if uid_raw and not str(uid_raw).startswith("CHE") else str(uid_raw),
+            "is_commercially_active": is_active,
+            "vat_registered": best.get("vatRegisterInformation", {}).get("vatStatus") == "registered",
+            "legal_form": best.get("organisation", {}).get("legalForm"),
+            "business_type": best.get("organisation", {}).get("uid"),
+        }
     except Exception as e:
-        print(f"[gleif] Error for LEI {lei}: {e}")
-    return None
+        print(f"[uid] Search error for '{display_name}': {e}")
+        return {"source": "uid", "available": False}
 
 
-def search_lei(name: str) -> Optional[str]:
-    """Search GLEIF by company name, return LEI if found."""
+# ── GLEIF LEI Register ─────────────────────────────────────────
+
+def _search_by_name(name: str, jurisdiction: str = None) -> Optional[dict]:
+    """Search GLEIF by entity name. Returns first matching LEI record."""
+    params = {
+        "filter[entity.legalName]": name,
+        "page[size]": 5,
+        "page[number]": 1,
+    }
+    if jurisdiction:
+        params["filter[entity.legalAddress.country]"] = jurisdiction
+
     try:
         r = httpx.get(
             f"{GLEIF_API}/lei-records",
-            params={
-                "filter[entity.legalName]": name,
-                "page[size]":              5,
-            },
-            headers={"Accept": "application/vnd.api+json"},
-            timeout=10,
+            params=params,
+            headers=HEADERS,
+            timeout=15,
         )
         if r.status_code == 200:
-            records = r.json().get("data", [])
-            if records:
-                return records[0].get("id")
-    except Exception:
-        pass
+            data = r.json()
+            items = data.get("data", [])
+            if items:
+                return _best_match(items, name)
+    except Exception as e:
+        print(f"[gleif] Name search error: {e}")
+
+    # Try fulltext search as fallback
+    try:
+        r2 = httpx.get(
+            f"{GLEIF_API}/lei-records",
+            params={"filter[fulltext]": name, "page[size]": 5},
+            headers=HEADERS,
+            timeout=15,
+        )
+        if r2.status_code == 200:
+            items = r2.json().get("data", [])
+            if items:
+                return _best_match(items, name)
+    except Exception as e:
+        print(f"[gleif] Fulltext search error: {e}")
+
     return None
 
 
-def enrich_gleif(slug: str, display_name: str = "") -> dict:
-    """Fetch GLEIF LEI data for a counterparty."""
-    lei = LEI_MAP.get(slug)
+def _best_match(items: list, search_name: str) -> Optional[dict]:
+    """Find the best matching record from GLEIF results."""
+    name_lower = search_name.lower()
+    for item in items:
+        attrs  = item.get("attributes", {})
+        entity = attrs.get("entity", {})
+        legal_name = (entity.get("legalName") or {}).get("name", "").lower()
+        if name_lower in legal_name or legal_name in name_lower:
+            return item
+    return items[0] if items else None
 
-    if not lei and display_name:
-        lei = search_lei(display_name)
 
-    if not lei:
-        return {"source": "gleif", "available": False}
-
-    record = get_lei_record(lei)
-    if not record:
-        return {"source": "gleif", "available": False}
-
+def _parse_lei_record(record: dict) -> dict:
+    """Parse a GLEIF LEI record into Raven fields."""
     attrs  = record.get("attributes", {})
     entity = attrs.get("entity", {})
     reg    = attrs.get("registration", {})
-
-    result = {
-        "source":    "gleif",
-        "available": True,
-        "lei":       record.get("id"),
-        "fetched_at": datetime.utcnow().isoformat(),
-    }
-
-    # Entity status
-    entity_status = (entity.get("status") or "").upper()
-    result["lei_status"]    = entity_status
-    result["license_active_gleif"] = entity_status == "ACTIVE"
-
-    # Legal names
-    legal_name = entity.get("legalName", {})
-    result["gleif_legal_name"] = (
-        legal_name.get("name") if isinstance(legal_name, dict) else legal_name
-    )
+    lei    = record.get("id", "")
 
     # Jurisdiction
-    result["gleif_jurisdiction"] = entity.get("jurisdiction")
+    legal_addr   = entity.get("legalAddress", {})
+    hq_addr      = entity.get("headquartersAddress", {})
+    country      = legal_addr.get("country") or hq_addr.get("country", "")
 
-    # Headquarters
-    hq = entity.get("headquartersAddress", {})
-    result["gleif_country"]  = hq.get("country")
-    result["gleif_city"]     = hq.get("city")
-    result["gleif_postcode"] = hq.get("postalCode")
+    # Status
+    reg_status   = reg.get("status", "")
+    entity_status = entity.get("status", "")
+    lei_valid    = reg_status in ("ISSUED", "PENDING_TRANSFER", "PENDING_ARCHIVAL")
 
-    # Registration details
-    result["gleif_registration_date"] = reg.get("initialRegistrationDate", "")[:10]
-    result["gleif_last_updated"]       = reg.get("lastUpdateDate", "")[:10]
-    result["gleif_next_renewal"]       = reg.get("nextRenewalDate", "")[:10]
+    # Registration date
+    initial_reg  = reg.get("initialRegistrationDate", "")[:10] if reg.get("initialRegistrationDate") else ""
 
-    # LEI registration status (ISSUED = valid and current)
-    reg_status = (reg.get("status") or "").upper()
-    result["lei_registration_valid"] = reg_status == "ISSUED"
+    return {
+        "source":                "gleif",
+        "available":             True,
+        "fetched_at":            datetime.utcnow().isoformat(),
+        "lei":                   lei,
+        "lei_status":            reg_status,
+        "lei_registration_valid": lei_valid,
+        "license_active_gleif":  lei_valid,
+        "gleif_legal_name":      (entity.get("legalName") or {}).get("name"),
+        "gleif_country":         country,
+        "gleif_entity_status":   entity_status,
+        "gleif_initial_reg":     initial_reg,
+        "gleif_last_updated":    reg.get("lastUpdateDate", "")[:10] if reg.get("lastUpdateDate") else "",
+        "gleif_url":             f"https://search.gleif.org/#/record/{lei}",
+        "gleif_next_renewal":    reg.get("nextRenewalDate", "")[:10] if reg.get("nextRenewalDate") else "",
+    }
 
-    # Managing LOU (the authority that issued the LEI)
-    result["gleif_lou"] = reg.get("managingLou")
 
-    # Link
-    result["gleif_url"] = f"https://search.gleif.org/#/record/{lei}"
+def enrich_gleif(slug: str, display_name: str = "", jurisdiction: str = "") -> dict:
+    """
+    Main entry point. Fetch GLEIF LEI data for any counterparty.
+    Uses official GLEIF REST API — public, no auth required.
+    """
+    if not display_name and not slug:
+        return {"source": "gleif", "available": False}
 
-    return result
+    search_name = display_name or slug
+
+    record = _search_by_name(search_name, jurisdiction or None)
+
+    # Retry with first two words if full name not found
+    if not record and len(search_name.split()) > 2:
+        short = " ".join(search_name.split()[:2])
+        record = _search_by_name(short, jurisdiction or None)
+
+    if not record:
+        return {"source": "gleif", "available": False, "searched": search_name}
+
+    return _parse_lei_record(record)
