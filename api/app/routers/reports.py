@@ -36,26 +36,40 @@ async def generate_report_endpoint(
     background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    report_id  = str(uuid.uuid4())
-    count      = len(supabase.table("reports").select("report_id").execute().data)
-    report_ref = f"RPT-{datetime.utcnow().year}-{count+1:03d}"
-    title      = body.title or f"Risk Report — {body.report_period}"
+    try:
+        report_id  = str(uuid.uuid4())
+        count      = len(supabase.table("reports").select("report_id").execute().data or [])
+        report_ref = f"RPT-{datetime.utcnow().year}-{count+1:03d}"
+        title      = body.title or f"Risk Report - {body.report_period}"
 
-    supabase.table("reports").insert({
-        "report_id": report_id,
-        "tenant_id": settings.DEFAULT_TENANT_ID,
-        "client_id": body.client_id,
-        "portfolio_id": body.portfolio_id,
-        "report_ref": report_ref,
-        "title": title,
-        "report_period": body.report_period,
-        "status": "DRAFT",
-        "generation_started_at": datetime.utcnow().isoformat(),
-    }).execute()
+        result = supabase.table("reports").insert({
+            "report_id":              report_id,
+            "tenant_id":              settings.DEFAULT_TENANT_ID,
+            "client_id":              body.client_id,
+            "portfolio_id":           body.portfolio_id,
+            "report_ref":             report_ref,
+            "title":                  title,
+            "report_period":          body.report_period,
+            "status":                 "DRAFT",
+            "generation_started_at":  datetime.utcnow().isoformat(),
+        }).execute()
 
-    background_tasks.add_task(generate_report, report_id, body.portfolio_id, body.client_id)
+        if not result.data:
+            raise HTTPException(status_code=500, detail="Failed to create report record in database")
 
-    return {"status": "generation_started", "report_id": report_id, "report_ref": report_ref, "estimated_minutes": 3}
+        background_tasks.add_task(generate_report, report_id, body.portfolio_id, body.client_id)
+
+        return {
+            "status":            "generation_started",
+            "report_id":         report_id,
+            "report_ref":        report_ref,
+            "estimated_minutes": 3,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[reports] Generate error: {e}")
+        raise HTTPException(status_code=500, detail=f"Report generation failed: {str(e)}")
 
 
 @router.get("")
