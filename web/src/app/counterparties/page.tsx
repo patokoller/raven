@@ -117,8 +117,8 @@ export default function CounterpartiesPage() {
 
   async function saveEdit(id: string, data: any) {
     try {
-      const r = await fetch(`${API}/api/v1/counterparties/${id}`, {
-        method: 'PATCH', headers: H(), body: JSON.stringify(data),
+      const r = await fetch(`${API}/api/v1/counterparties/${id}/update`, {
+        method: 'POST', headers: H(), body: JSON.stringify(data),
       })
       if (!r.ok) throw new Error((await r.json()).detail)
       setCps(prev => prev.map(cp => cp.counterparty_id === id ? { ...cp, ...data } : cp))
@@ -130,8 +130,8 @@ export default function CounterpartiesPage() {
   async function doDelete(id: string, name: string) {
     setDeletingId(id)
     try {
-      const r = await fetch(`${API}/api/v1/counterparties/${id}`, {
-        method: 'DELETE', headers: H(),
+      const r = await fetch(`${API}/api/v1/counterparties/${id}/delete`, {
+        method: 'POST', headers: H(),
       })
       if (!r.ok) throw new Error((await r.json()).detail)
       setCps(prev => prev.filter(cp => cp.counterparty_id !== id))
