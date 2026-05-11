@@ -566,16 +566,18 @@ async def get_data_sources(
             }
             # SECO
             seco = ri.get("_seco", {})
-            sources["seco"] = {
-                "name": "SECO Swiss Sanctions",
-                "available": ri.get("available", False),
+            sources["opensanctions_ch"] = {
+                "name": "OpenSanctions (SECO CH)",
+                "available": ri.get("available", False) and seco.get("available", False),
                 "data": {
-                    "screened": seco.get("available", False),
+                    "dataset": "ch_seco_sanctions",
                     "match": seco.get("match", False),
+                    "score": seco.get("score"),
+                    "matched_name": seco.get("matched_name"),
                     "screened_at": seco.get("screened_at"),
-                    "result": "CLEAR" if not seco.get("match") else "MATCH",
+                    "result": "CLEAR" if not seco.get("match") else "MATCH - REVIEW REQUIRED",
                 },
-                "url": "https://www.seco.admin.ch/seco/en/home/Aussenwirtschaftspolitik_Wirtschaftliche_Zusammenarbeit/Wirtschaftsbeziehungen/exportkontrollen-und-sanktionen/sanktionen-embargos.html",
+                "url": "https://www.opensanctions.org/datasets/ch_seco_sanctions/",
             }
             # SNB
             snb_d = ri.get("_snb", {})

@@ -1,206 +1,175 @@
 """
-Raven — SECO Swiss Sanctions Provider
-Uses OpenSanctions API (opensanctions.org) which aggregates the SECO
-Swiss Sanctions/Embargoes list and provides a proper matching API.
+Raven — OpenSanctions Swiss SECO Sanctions Provider
 
-API: https://api.opensanctions.org/match/ch_seco_sanctions
-POST with JSON body: {"queries": {"q1": {"schema": "LegalEntity", "properties": {"name": ["..."]} }}}
-Requires API key for commercial use.
+Screens counterparties against the Swiss SECO sanctions list via OpenSanctions.
+Dataset: ch_seco_sanctions
+Source: https://www.opensanctions.org/datasets/ch_seco_sanctions/
 
-Bulk download fallback (no auth): 
-https://data.opensanctions.org/datasets/latest/ch_seco_sanctions/names.txt
+API endpoints:
+  Match:  POST https://api.opensanctions.org/match/ch_seco_sanctions
+  Search: GET  https://api.opensanctions.org/search/ch_seco_sanctions?q=...
+  Bulk:   GET  https://data.opensanctions.org/datasets/latest/ch_seco_sanctions/names.txt
+
+API key required for match/search (commercial use).
+Bulk names.txt is always free and used as fallback.
+
+50 req/month quota — results cached 30 days per entity.
 """
 
 import httpx
-import re
 from datetime import datetime, timedelta
 from app.core.config import settings
 
-# In-memory cache: entity_name -> (result, timestamp)
-# Prevents burning API quota on repeated lookups of the same entity
+MATCH_URL  = "https://api.opensanctions.org/match/ch_seco_sanctions"
+SEARCH_URL = "https://api.opensanctions.org/search/ch_seco_sanctions"
+NAMES_URL  = "https://data.opensanctions.org/datasets/latest/ch_seco_sanctions/names.txt"
+
+# In-memory cache — avoids burning quota on repeat lookups
 _RESULT_CACHE: dict = {}
-_RESULT_CACHE_TTL = timedelta(days=30)  # Cache for 30 days (within monthly quota)
-
-OPENSANCTIONS_MATCH  = "https://api.opensanctions.org/match/ch_seco_sanctions"
-OPENSANCTIONS_SEARCH = "https://api.opensanctions.org/search/ch_seco_sanctions"
-NAMES_TXT_URL        = "https://data.opensanctions.org/datasets/latest/ch_seco_sanctions/names.txt"
-
-_NAMES_CACHE: dict = {}
-_CACHE_TTL = 3600 * 24  # 24h
+_NAMES_CACHE:  dict = {}
+RESULT_TTL = timedelta(days=30)
+NAMES_TTL  = timedelta(hours=24)
 
 
-def _get_api_headers() -> dict:
-    headers = {"Accept": "application/json", "User-Agent": "Raven Risk Intelligence / raven.internal"}
-    api_key = getattr(settings, "OPENSANCTIONS_API_KEY", None)
-    if api_key:
-        headers["Authorization"] = f"ApiKey {api_key}"
-    return headers
-
-
-def _screen_via_api(name: str, legal_name: str = None) -> dict:
-    """Use OpenSanctions match API (preferred — requires API key for commercial use)."""
-    names = [n for n in [name, legal_name] if n]
-    body = {
-        "queries": {
-            "q1": {
-                "schema": "LegalEntity",
-                "properties": {"name": names},
-            }
-        }
+def _headers() -> dict:
+    h = {
+        "Accept":     "application/json",
+        "User-Agent": "Raven Risk Intelligence / raven.internal",
     }
-    r = httpx.post(
-        OPENSANCTIONS_MATCH,
-        json=body,
-        headers=_get_api_headers(),
-        timeout=15,
-    )
-    if r.status_code == 200:
-        data   = r.json()
-        result = data.get("responses", {}).get("q1", {})
-        hits   = result.get("results", [])
-        if hits:
-            top = hits[0]
-            score = top.get("score", 0)
-            # OpenSanctions score >0.7 = likely match
-            if score > 0.5:
-                return {
-                    "source":        "seco_opensanctions",
-                    "available":     True,
-                    "match":         score > 0.7,
-                    "score":         score,
-                    "matched_name":  top.get("caption"),
-                    "entity_id":     top.get("id"),
-                    "topics":        top.get("properties", {}).get("topics", []),
-                    "screened_at":   datetime.utcnow().isoformat(),
-                }
-        match_result = {
-            "source": "seco_opensanctions", "available": True,
-            "match": False, "score": 0,
-            "screened_at": datetime.utcnow().isoformat(),
-        }
-        _RESULT_CACHE[entity_name.lower().strip()] = (match_result, datetime.utcnow())
-        return match_result
-    return {}
+    key = getattr(settings, "OPENSANCTIONS_API_KEY", "")
+    if key:
+        h["Authorization"] = f"ApiKey {key}"
+    return h
 
 
-def _screen_via_search(name: str) -> dict:
-    """Use OpenSanctions search endpoint (free, less precise)."""
-    r = httpx.get(
-        OPENSANCTIONS_SEARCH,
-        params={"q": name, "limit": 5},
-        headers=_get_api_headers(),
-        timeout=12,
-    )
-    if r.status_code == 200:
-        data    = r.json()
-        results = data.get("results", [])
-        for hit in results:
-            caption = (hit.get("caption") or "").lower()
-            if name.lower() in caption or caption in name.lower():
+def _via_match_api(name: str, legal_name: str = None) -> dict:
+    """POST to /match/ch_seco_sanctions — most accurate, costs 1 quota unit."""
+    names = [n for n in [name, legal_name] if n]
+    try:
+        r = httpx.post(
+            MATCH_URL,
+            json={"queries": {"q1": {"schema": "LegalEntity", "properties": {"name": names}}}},
+            headers=_headers(),
+            timeout=15,
+        )
+        if r.status_code == 200:
+            hits = r.json().get("responses", {}).get("q1", {}).get("results", [])
+            if hits:
+                top   = hits[0]
+                score = top.get("score", 0)
                 return {
-                    "source":       "seco_opensanctions",
                     "available":    True,
-                    "match":        True,
-                    "matched_name": hit.get("caption"),
-                    "screened_at":  datetime.utcnow().isoformat(),
+                    "match":        score >= 0.7,
+                    "score":        round(score, 3),
+                    "matched_name": top.get("caption"),
+                    "entity_id":    top.get("id"),
+                    "topics":       top.get("properties", {}).get("topics", []),
+                    "method":       "match_api",
                 }
-        return {
-            "source": "seco_opensanctions", "available": True,
-            "match": False, "screened_at": datetime.utcnow().isoformat(),
-        }
+            return {"available": True, "match": False, "score": 0, "method": "match_api"}
+        if r.status_code == 402:
+            print("[opensanctions] Quota exceeded — falling back to bulk")
+    except Exception as e:
+        print(f"[opensanctions] Match API error: {e}")
     return {}
 
 
-def _screen_via_bulk(name: str) -> dict:
-    """Fallback: download names.txt bulk file and check."""
-    cache_key = "seco_names"
-    if cache_key in _NAMES_CACHE:
-        entry = _NAMES_CACHE[cache_key]
-        if (datetime.utcnow() - entry["ts"]).seconds < _CACHE_TTL:
-            names_text = entry["data"]
-        else:
-            names_text = None
-    else:
-        names_text = None
+def _via_search_api(name: str) -> dict:
+    """GET /search/ch_seco_sanctions — costs 1 quota unit."""
+    try:
+        r = httpx.get(
+            SEARCH_URL,
+            params={"q": name, "limit": 5},
+            headers=_headers(),
+            timeout=12,
+        )
+        if r.status_code == 200:
+            results = r.json().get("results", [])
+            for hit in results:
+                caption = (hit.get("caption") or "").lower()
+                if name.lower() in caption or caption in name.lower():
+                    return {
+                        "available":    True,
+                        "match":        True,
+                        "matched_name": hit.get("caption"),
+                        "method":       "search_api",
+                    }
+            return {"available": True, "match": False, "method": "search_api"}
+    except Exception as e:
+        print(f"[opensanctions] Search API error: {e}")
+    return {}
 
-    if names_text is None:
+
+def _via_bulk_names(name: str) -> dict:
+    """Free fallback: download names.txt and check locally. No quota cost."""
+    now = datetime.utcnow()
+    if "data" in _NAMES_CACHE and now - _NAMES_CACHE["ts"] < NAMES_TTL:
+        text = _NAMES_CACHE["data"]
+    else:
         try:
-            r = httpx.get(NAMES_TXT_URL, timeout=20, follow_redirects=True,
+            r = httpx.get(NAMES_URL, timeout=20, follow_redirects=True,
                           headers={"User-Agent": "Raven Risk Intelligence"})
-            if r.status_code == 200:
-                names_text = r.text
-                _NAMES_CACHE[cache_key] = {"data": names_text, "ts": datetime.utcnow()}
+            if r.status_code != 200:
+                return {}
+            text = r.text
+            _NAMES_CACHE["data"] = text
+            _NAMES_CACHE["ts"]   = now
         except Exception as e:
-            print(f"[seco] Bulk download error: {e}")
+            print(f"[opensanctions] Bulk download error: {e}")
             return {}
 
-    if not names_text:
-        return {}
-
     name_lower = name.lower().strip()
-    lines      = names_text.lower().splitlines()
-    for line in lines:
+    for line in text.lower().splitlines():
         line = line.strip()
         if len(line) < 4:
             continue
         if name_lower in line or (len(name_lower) >= 5 and line in name_lower):
-            return {
-                "source":       "seco_bulk",
-                "available":    True,
-                "match":        True,
-                "matched_name": line,
-                "screened_at":  datetime.utcnow().isoformat(),
-            }
+            return {"available": True, "match": True, "matched_name": line, "method": "bulk_names"}
 
-    return {
-        "source": "seco_bulk", "available": True,
-        "match": False, "screened_at": datetime.utcnow().isoformat(),
-    }
+    return {"available": True, "match": False, "method": "bulk_names"}
 
 
 def screen(entity_name: str, legal_name: str = None) -> dict:
     """
-    Screen an entity against SECO Swiss sanctions list via OpenSanctions.
-    Tries match API → search API → bulk names.txt fallback.
-    Caches results for 30 days to conserve API quota (50 req/month).
+    Screen an entity against Swiss SECO sanctions via OpenSanctions.
+
+    Strategy (quota-aware):
+    1. Check 30-day in-memory cache
+    2. Match API (precise, costs quota)
+    3. Search API (fallback, costs quota)
+    4. Bulk names.txt (free, always available)
     """
-    # Check cache first
     cache_key = (entity_name or "").lower().strip()
+
+    # Return cached result if fresh
     if cache_key in _RESULT_CACHE:
-        cached_result, cached_at = _RESULT_CACHE[cache_key]
-        if datetime.utcnow() - cached_at < _RESULT_CACHE_TTL:
-            cached_result["from_cache"] = True
-            return cached_result
+        cached, ts = _RESULT_CACHE[cache_key]
+        if datetime.utcnow() - ts < RESULT_TTL:
+            return {**cached, "from_cache": True}
 
-    # Try match API first (most accurate)
-    try:
-        result = _screen_via_api(entity_name, legal_name)
-        if result:
-            return result
-    except Exception as e:
-        print(f"[seco] Match API error: {e}")
+    result = {}
 
-    # Try search endpoint
-    try:
-        result = _screen_via_search(entity_name)
-        if result:
-            return result
-    except Exception as e:
-        print(f"[seco] Search API error: {e}")
+    # Try match API (most precise)
+    if getattr(settings, "OPENSANCTIONS_API_KEY", ""):
+        result = _via_match_api(entity_name, legal_name)
 
-    # Fallback: bulk file (no quota cost)
-    try:
-        result = _screen_via_bulk(entity_name)
-        if result:
-            _RESULT_CACHE[cache_key] = (result, datetime.utcnow())
-            return result
-    except Exception as e:
-        print(f"[seco] Bulk fallback error: {e}")
+    # Fall back to search API
+    if not result and getattr(settings, "OPENSANCTIONS_API_KEY", ""):
+        result = _via_search_api(entity_name)
 
-    final = {
-        "source": "seco", "available": False,
-        "reason": "all_methods_failed",
-        "screened_at": datetime.utcnow().isoformat(),
-    }
-    _RESULT_CACHE[cache_key] = (final, datetime.utcnow())
-    return final
+    # Always fall back to free bulk check
+    if not result:
+        result = _via_bulk_names(entity_name)
+
+    if not result:
+        result = {"available": False, "reason": "all_methods_failed"}
+
+    result["source"]       = "opensanctions_ch_seco"
+    result["dataset"]      = "ch_seco_sanctions"
+    result["screened_at"]  = datetime.utcnow().isoformat()
+    result["dataset_url"]  = "https://www.opensanctions.org/datasets/ch_seco_sanctions/"
+
+    # Cache the result
+    _RESULT_CACHE[cache_key] = (result, datetime.utcnow())
+
+    return result
