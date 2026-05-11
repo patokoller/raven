@@ -26,17 +26,22 @@ DEFILLAMA_BASE = "https://api.llama.fi"
 # DefiLlama protocol slugs for CEX entities
 # Format: {our_slug}: {defillama_protocol_slug}
 CEX_SLUGS = {
-    "binance":    "binance-cex",
-    "coinbase":   "coinbase-cex",
-    "kraken":     "kraken-cex",
-    "okx":        "okx-cex",
-    "bybit":      "bybit-cex",
-    "bitfinex":   "bitfinex",
-    "gemini":     "gemini-cex",
-    "bitstamp":   "bitstamp",
-    "deribit":    "deribit",
-    "cex-io":     "cex.io",
-    "lmax-digital": None,  # not tracked
+    "binance":         "binance",
+    "coinbase":        "coinbase",
+    "coinbase-custody": "coinbase",
+    "kraken":          "kraken",
+    "okx":             "okx",
+    "bybit":           "bybit",
+    "bitfinex":        "bitfinex",
+    "gemini":          "gemini",
+    "bitstamp":        "bitstamp",
+    "deribit":         "deribit",
+    "cex-io":          "cex-io",
+    "crypto-com":      "crypto-com",
+    "gate-io":         "gate-io",
+    "huobi":           "huobi",
+    "kucoin":          "kucoin",
+    "lmax-digital":    None,  # not tracked by DefiLlama
 }
 
 HEADERS = {
@@ -54,17 +59,26 @@ def get_cex_reserves(slug: str) -> Optional[dict]:
     if not dl_slug:
         return None
 
-    try:
-        r = httpx.get(
-            f"{DEFILLAMA_BASE}/protocol/{dl_slug}",
-            headers=HEADERS,
-            timeout=12,
-        )
-        if r.status_code != 200:
-            print(f"[defillama_cex] {slug}: HTTP {r.status_code}")
-            return None
+    # Try the CEX-specific endpoint first, then protocol fallback
+    data = None
+    for url in [
+        f"{DEFILLAMA_BASE}/cexs/{dl_slug}",
+        f"{DEFILLAMA_BASE}/protocol/{dl_slug}",
+    ]:
+        try:
+            r = httpx.get(url, headers=HEADERS, timeout=12)
+            if r.status_code == 200:
+                data = r.json()
+                break
+            print(f"[defillama_cex] {url}: HTTP {r.status_code}")
+        except Exception as e:
+            print(f"[defillama_cex] {url}: {e}")
 
-        data = r.json()
+    if not data:
+        return None
+
+    try:
+        pass  # data already assigned above
 
         # Current TVL (total reserves)
         tvl_current = data.get("currentChainTvls", {})

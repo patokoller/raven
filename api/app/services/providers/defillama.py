@@ -82,30 +82,36 @@ def get_protocol_tvl(slug: str) -> Optional[dict]:
 
 def get_exchange_volume(slug: str) -> Optional[dict]:
     """
-    Get 24h and 7d volume for an exchange from DefiLlama DEX tracker.
-    Returns dict with volume_24h_usd, volume_7d_usd.
+    Get volume data for a CEX from DefiLlama.
+    CEX volume endpoint: /overview/cexs/{slug}
+    DEX volume endpoint: /overview/dexs/{slug}
     """
     dl_slug = EXCHANGE_SLUGS.get(slug)
     if not dl_slug:
         return None
 
-    try:
-        r = httpx.get(
-            f"{BASE}/overview/dexs/{dl_slug}",
-            params={"excludeTotalDataChart": "true", "excludeTotalDataChartBreakdown": "true"},
-            timeout=10,
-        )
-        if r.status_code == 200:
-            data = r.json()
-            return {
-                "source":        "defillama",
-                "volume_24h":    data.get("total24h"),
-                "volume_7d":     data.get("total7d"),
-                "volume_30d":    data.get("total30d"),
-                "fetched_at":    datetime.utcnow().isoformat(),
-            }
-    except Exception as e:
-        print(f"[defillama] Error fetching exchange {dl_slug}: {e}")
+    # Try CEX volume first (Binance, Coinbase etc. are CEXs not DEXs)
+    for endpoint in (f"{BASE}/overview/cexs/{dl_slug}",
+                     f"{BASE}/overview/dexs/{dl_slug}"):
+        try:
+            r = httpx.get(
+                endpoint,
+                params={"excludeTotalDataChart": "true", "excludeTotalDataChartBreakdown": "true"},
+                timeout=10,
+            )
+            if r.status_code == 200:
+                data = r.json()
+                vol = data.get("total24h") or data.get("totalVolume24h")
+                if vol:
+                    return {
+                        "source":     "defillama",
+                        "volume_24h": vol,
+                        "volume_7d":  data.get("total7d"),
+                        "volume_30d": data.get("total30d"),
+                        "fetched_at": datetime.utcnow().isoformat(),
+                    }
+        except Exception as e:
+            print(f"[defillama] Exchange volume error {dl_slug}: {e}")
 
     return None
 
