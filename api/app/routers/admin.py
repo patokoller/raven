@@ -150,6 +150,68 @@ async def add_counterparty(
     return {"status": "created", "counterparty": cp.data[0]}
 
 
+
+@router.patch("/counterparties/{counterparty_id}")
+async def update_counterparty(
+    counterparty_id: str,
+    body: dict,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Update counterparty metadata (display_name, entity_type, jurisdiction, regulator)."""
+    allowed = {"display_name","legal_name","entity_type","jurisdiction",
+               "regulator","license_number","website","notes"}
+    update = {k: v for k, v in body.items() if k in allowed}
+    if not update:
+        raise HTTPException(status_code=400, detail="No valid fields to update")
+
+    existing = supabase.table("counterparties").select("counterparty_id,display_name")         .eq("counterparty_id", counterparty_id).execute()
+    if not existing.data:
+        raise HTTPException(status_code=404, detail="Counterparty not found")
+
+    supabase.table("counterparties").update(update)         .eq("counterparty_id", counterparty_id).execute()
+
+    supabase.table("audit_log").insert({
+        "tenant_id":      settings.DEFAULT_TENANT_ID,
+        "event_category": "DATA_WRITE",
+        "event_type":     "counterparty.updated",
+        "actor_type":     "USER",
+        "actor_id":       current_user.user_id,
+        "resource_type":  "counterparties",
+        "resource_id":    counterparty_id,
+        "metadata":       {"fields_updated": list(update.keys())},
+    }).execute()
+
+    return {"status": "updated", "counterparty_id": counterparty_id}
+
+
+@router.delete("/counterparties/{counterparty_id}")
+async def delete_counterparty(
+    counterparty_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Soft-delete a counterparty (sets is_active=False)."""
+    existing = supabase.table("counterparties")         .select("counterparty_id,display_name,slug")         .eq("counterparty_id", counterparty_id).execute()
+    if not existing.data:
+        raise HTTPException(status_code=404, detail="Counterparty not found")
+
+    cp = existing.data[0]
+
+    # Soft delete — preserve data, just deactivate
+    supabase.table("counterparties").update({"is_active": False})         .eq("counterparty_id", counterparty_id).execute()
+
+    supabase.table("audit_log").insert({
+        "tenant_id":      settings.DEFAULT_TENANT_ID,
+        "event_category": "DATA_WRITE",
+        "event_type":     "counterparty.deleted",
+        "actor_type":     "USER",
+        "actor_id":       current_user.user_id,
+        "resource_type":  "counterparties",
+        "resource_id":    counterparty_id,
+        "metadata":       {"slug": cp["slug"], "display_name": cp["display_name"]},
+    }).execute()
+
+    return {"status": "deleted", "counterparty_id": counterparty_id}
+
 @router.post("/research/batch")
 async def batch_research(
     current_user: CurrentUser = Depends(get_current_user),
