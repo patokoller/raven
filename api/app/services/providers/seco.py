@@ -13,8 +13,13 @@ https://data.opensanctions.org/datasets/latest/ch_seco_sanctions/names.txt
 
 import httpx
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from app.core.config import settings
+
+# In-memory cache: entity_name -> (result, timestamp)
+# Prevents burning API quota on repeated lookups of the same entity
+_RESULT_CACHE: dict = {}
+_RESULT_CACHE_TTL = timedelta(days=30)  # Cache for 30 days (within monthly quota)
 
 OPENSANCTIONS_MATCH  = "https://api.opensanctions.org/match/ch_seco_sanctions"
 OPENSANCTIONS_SEARCH = "https://api.opensanctions.org/search/ch_seco_sanctions"
@@ -68,11 +73,13 @@ def _screen_via_api(name: str, legal_name: str = None) -> dict:
                     "topics":        top.get("properties", {}).get("topics", []),
                     "screened_at":   datetime.utcnow().isoformat(),
                 }
-        return {
+        match_result = {
             "source": "seco_opensanctions", "available": True,
             "match": False, "score": 0,
             "screened_at": datetime.utcnow().isoformat(),
         }
+        _RESULT_CACHE[entity_name.lower().strip()] = (match_result, datetime.utcnow())
+        return match_result
     return {}
 
 
@@ -155,7 +162,16 @@ def screen(entity_name: str, legal_name: str = None) -> dict:
     """
     Screen an entity against SECO Swiss sanctions list via OpenSanctions.
     Tries match API → search API → bulk names.txt fallback.
+    Caches results for 30 days to conserve API quota (50 req/month).
     """
+    # Check cache first
+    cache_key = (entity_name or "").lower().strip()
+    if cache_key in _RESULT_CACHE:
+        cached_result, cached_at = _RESULT_CACHE[cache_key]
+        if datetime.utcnow() - cached_at < _RESULT_CACHE_TTL:
+            cached_result["from_cache"] = True
+            return cached_result
+
     # Try match API first (most accurate)
     try:
         result = _screen_via_api(entity_name, legal_name)
@@ -172,14 +188,19 @@ def screen(entity_name: str, legal_name: str = None) -> dict:
     except Exception as e:
         print(f"[seco] Search API error: {e}")
 
-    # Fallback: bulk file
+    # Fallback: bulk file (no quota cost)
     try:
-        return _screen_via_bulk(entity_name)
+        result = _screen_via_bulk(entity_name)
+        if result:
+            _RESULT_CACHE[cache_key] = (result, datetime.utcnow())
+            return result
     except Exception as e:
         print(f"[seco] Bulk fallback error: {e}")
 
-    return {
+    final = {
         "source": "seco", "available": False,
         "reason": "all_methods_failed",
         "screened_at": datetime.utcnow().isoformat(),
     }
+    _RESULT_CACHE[cache_key] = (final, datetime.utcnow())
+    return final
