@@ -253,6 +253,42 @@ class EnrichmentData(BaseModel):
     analyst_notes: Optional[str] = None
 
 
+
+@router.patch("/{counterparty_id}")
+async def update_counterparty(
+    counterparty_id: UUID,
+    body: dict,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Update counterparty fields."""
+    allowed = {"display_name","legal_name","entity_type","jurisdiction",
+               "regulator","license_number","website","notes"}
+    update = {k: v for k, v in body.items() if k in allowed and v is not None}
+    if not update:
+        raise HTTPException(status_code=400, detail="No valid fields to update")
+
+    r = supabase.table("counterparties").update(update)         .eq("counterparty_id", str(counterparty_id)).execute()
+    if not r.data:
+        raise HTTPException(status_code=404, detail="Counterparty not found")
+
+    return {"status": "updated", "counterparty_id": str(counterparty_id)}
+
+
+@router.delete("/{counterparty_id}")
+async def delete_counterparty(
+    counterparty_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Soft-delete a counterparty."""
+    r = supabase.table("counterparties").select("counterparty_id,display_name,slug")         .eq("counterparty_id", str(counterparty_id)).execute()
+    if not r.data:
+        raise HTTPException(status_code=404, detail="Counterparty not found")
+
+    supabase.table("counterparties").update({"is_active": False})         .eq("counterparty_id", str(counterparty_id)).execute()
+
+    return {"status": "deleted", "counterparty_id": str(counterparty_id)}
+
+
 @router.post("/{counterparty_id}/enrichment")
 async def save_enrichment(
     counterparty_id: UUID,

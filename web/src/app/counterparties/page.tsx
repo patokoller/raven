@@ -117,7 +117,7 @@ export default function CounterpartiesPage() {
 
   async function saveEdit(id: string, data: any) {
     try {
-      const r = await fetch(`${API}/api/v1/admin/counterparties/${id}`, {
+      const r = await fetch(`${API}/api/v1/counterparties/${id}`, {
         method: 'PATCH', headers: H(), body: JSON.stringify(data),
       })
       if (!r.ok) throw new Error((await r.json()).detail)
@@ -130,7 +130,7 @@ export default function CounterpartiesPage() {
   async function doDelete(id: string, name: string) {
     setDeletingId(id)
     try {
-      const r = await fetch(`${API}/api/v1/admin/counterparties/${id}`, {
+      const r = await fetch(`${API}/api/v1/counterparties/${id}`, {
         method: 'DELETE', headers: H(),
       })
       if (!r.ok) throw new Error((await r.json()).detail)
