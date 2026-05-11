@@ -76,7 +76,7 @@ def get_cex_reserves(slug: str) -> Optional[dict]:
         return None
 
     try:
-        r = httpx.get(f"{BASE}/protocol/{dl_slug}", headers=HEADERS, timeout=15)
+        r = httpx.get(f"{BASE}/protocol/{dl_slug}", headers=HEADERS, timeout=12)
         if r.status_code != 200:
             print(f"[defillama_cex] /protocol/{dl_slug}: HTTP {r.status_code}")
             return None

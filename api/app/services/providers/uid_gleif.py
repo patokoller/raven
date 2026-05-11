@@ -39,7 +39,7 @@ def enrich_uid(slug: str, display_name: str = "") -> dict:
             f"{UID_API}/search",
             json={"name": search_term, "maxEntries": 5, "offset": 0},
             headers=HEADERS,
-            timeout=12,
+            timeout=10,
         )
         if r.status_code != 200:
             return {"source": "uid", "available": False}
@@ -95,7 +95,7 @@ def _search_by_name(name: str, jurisdiction: str = None) -> Optional[dict]:
             f"{GLEIF_API}/lei-records",
             params=params,
             headers=HEADERS,
-            timeout=15,
+            timeout=10,
         )
         if r.status_code == 200:
             data = r.json()
@@ -111,7 +111,7 @@ def _search_by_name(name: str, jurisdiction: str = None) -> Optional[dict]:
             f"{GLEIF_API}/lei-records",
             params={"filter[fulltext]": name, "page[size]": 5},
             headers=HEADERS,
-            timeout=15,
+            timeout=10,
         )
         if r2.status_code == 200:
             items = r2.json().get("data", [])

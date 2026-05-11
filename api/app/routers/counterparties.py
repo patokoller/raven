@@ -4,6 +4,7 @@ Raven — Counterparties Router
 
 from typing import Optional, List
 from uuid import UUID
+import asyncio
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -466,8 +467,8 @@ async def get_data_sources(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """
-    Fetch live data from all providers for a counterparty and return
-    what each source contributes. Used for the data sources panel.
+    Fetch live data from all providers for a counterparty.
+    Runs with a 50s overall timeout to avoid 502 on slow providers.
     """
     from app.services.providers import defillama, edgar, fca as fca_provider, zefix as zefix_provider, finma as finma_provider, uid_gleif, nansen as nansen_provider, defillama_cex, sanctions as sanctions_provider, regulatory_intelligence as reg_intel, snb as snb_provider
 
@@ -552,9 +553,13 @@ async def get_data_sources(
 
     if is_swiss:
         # FINMA — direct Excel download from finma.ch/en/.../beh.xlsx
-        finma_result = finma_provider.enrich_counterparty(
-            cp.get("slug",""), cp.get("display_name","")
-        )
+        try:
+            finma_result = finma_provider.enrich_counterparty(
+                cp.get("slug",""), cp.get("display_name","")
+            )
+        except Exception as _e:
+            print(f"[data_sources] FINMA error: {_e}")
+            finma_result = {"available": False}
         sources["finma"] = {
             "name": "FINMA Supervised Institutions",
             "available": finma_result.get("available", False),
@@ -566,9 +571,13 @@ async def get_data_sources(
 
         # OpenSanctions — ch_seco_sanctions dataset
         from app.services.providers import seco as seco_provider
-        seco_result = seco_provider.screen(
-            cp.get("display_name",""), cp.get("legal_name")
-        )
+        try:
+            seco_result = seco_provider.screen(
+                cp.get("display_name",""), cp.get("legal_name")
+            )
+        except Exception as _e:
+            print(f"[data_sources] OpenSanctions error: {_e}")
+            seco_result = {"available": False}
         sources["opensanctions_ch"] = {
             "name": "OpenSanctions (SECO CH)",
             "available": seco_result.get("available", False),
@@ -585,9 +594,13 @@ async def get_data_sources(
         }
 
         # SNB Banking Statistics — direct warehouse API
-        snb_result = snb_provider.enrich_counterparty(
-            cp.get("slug",""), cp.get("display_name",""), cp.get("jurisdiction","CH")
-        )
+        try:
+            snb_result = snb_provider.enrich_counterparty(
+                cp.get("slug",""), cp.get("display_name",""), cp.get("jurisdiction","CH")
+            )
+        except Exception as _e:
+            print(f"[data_sources] SNB error: {_e}")
+            snb_result = {"available": False}
         sources["snb"] = {
             "name": "SNB Banking Statistics",
             "available": snb_result.get("available", False),
@@ -614,7 +627,11 @@ async def get_data_sources(
 
     if is_swiss or is_eu:
         # GLEIF — direct REST API (no auth)
-        gleif_result = uid_gleif.enrich_gleif(cp.get("slug",""), cp.get("display_name",""), jur)
+        try:
+            gleif_result = uid_gleif.enrich_gleif(cp.get("slug",""), cp.get("display_name",""), jur)
+        except Exception as _e:
+            print(f"[data_sources] GLEIF error: {_e}")
+            gleif_result = {"available": False}
         sources["gleif"] = {
             "name": "GLEIF LEI Register",
             "available": gleif_result.get("available", False),
@@ -681,7 +698,7 @@ async def get_data_sources(
 
     return {
         "counterparty_id": str(counterparty_id),
-        "entity_name":     cp["display_name"],
+        "entity_name":     cp.get("display_name", ""),
         "sources":         sources,
         "fetched_at":      datetime.utcnow().isoformat(),
     }

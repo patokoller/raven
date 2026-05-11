@@ -75,7 +75,7 @@ def get_protocol_tvl(slug: str) -> Optional[dict]:
     Works for both DeFi protocols and CEX reserves.
     """
     try:
-        r = httpx.get(f"{BASE}/protocol/{slug}", headers=HEADERS, timeout=15)
+        r = httpx.get(f"{BASE}/protocol/{slug}", headers=HEADERS, timeout=10)
         if r.status_code != 200:
             print(f"[defillama] /protocol/{slug}: HTTP {r.status_code}")
             return None
@@ -128,7 +128,7 @@ def get_dex_volume(slug: str) -> Optional[dict]:
     Returns DEX trading volume summary.
     """
     try:
-        r = httpx.get(f"{BASE}/summary/dexs/{slug}", headers=HEADERS, timeout=12)
+        r = httpx.get(f"{BASE}/summary/dexs/{slug}", headers=HEADERS, timeout=10)
         if r.status_code == 200:
             data = r.json()
             return {
@@ -147,7 +147,7 @@ def get_fees(slug: str) -> Optional[dict]:
     Returns protocol fees and revenue.
     """
     try:
-        r = httpx.get(f"{BASE}/summary/fees/{slug}", headers=HEADERS, timeout=12)
+        r = httpx.get(f"{BASE}/summary/fees/{slug}", headers=HEADERS, timeout=10)
         if r.status_code == 200:
             data = r.json()
             return {

@@ -66,7 +66,7 @@ def search_entity(search_term: str) -> Optional[dict]:
                 "result_type":  "entity",
                 "limit":        5,
             },
-            timeout=15,
+            timeout=12,
         )
 
         if r.status_code == 401:

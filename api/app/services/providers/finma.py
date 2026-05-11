@@ -36,7 +36,7 @@ _CACHE_TTL = 3600 * 24  # 24h
 def _download_xlsx() -> Optional[bytes]:
     """Download FINMA Excel file."""
     try:
-        r = httpx.get(FINMA_XLSX_URL, headers=HEADERS, timeout=30, follow_redirects=True)
+        r = httpx.get(FINMA_XLSX_URL, headers=HEADERS, timeout=20, follow_redirects=True)
         if r.status_code == 200:
             return r.content
         print(f"[finma] Excel download: HTTP {r.status_code}")

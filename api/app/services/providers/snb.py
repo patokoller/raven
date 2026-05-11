@@ -36,7 +36,7 @@ def _fetch(warehouse: str, lang: str = "en", fmt: str = "json") -> dict:
 
     url = f"{SNB_BASE}/{lang}/warehouse/{warehouse}/{fmt}"
     try:
-        r = httpx.get(url, headers=HEADERS, timeout=20, follow_redirects=True)
+        r = httpx.get(url, headers=HEADERS, timeout=15, follow_redirects=True)
         if r.status_code == 200:
             data = r.json() if fmt == "json" else {"raw": r.text, "ok": True}
             _CACHE[key] = {"data": data, "ts": datetime.utcnow()}
