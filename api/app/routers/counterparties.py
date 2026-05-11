@@ -469,7 +469,7 @@ async def get_data_sources(
     Fetch live data from all providers for a counterparty and return
     what each source contributes. Used for the data sources panel.
     """
-    from app.services.providers import defillama, edgar, fca as fca_provider, zefix as zefix_provider, finma as finma_provider, uid_gleif, nansen as nansen_provider, defillama_cex, sanctions as sanctions_provider
+    from app.services.providers import defillama, edgar, fca as fca_provider, zefix as zefix_provider, finma as finma_provider, uid_gleif, nansen as nansen_provider, defillama_cex, sanctions as sanctions_provider, seco as seco_provider, snb as snb_provider, eba as eba_provider
 
     cp = (
         supabase.table("counterparties")
@@ -541,6 +541,46 @@ async def get_data_sources(
         },
         "url": "https://ofac.treasury.gov/sanctions-list-service",
     }
+
+    # SECO Swiss Sanctions (CH-specific)
+    if cp.get("jurisdiction") == "CH" or "FINMA" in (cp.get("regulator","").upper()):
+        seco_result = seco_provider.screen(cp.get("display_name",""), cp.get("legal_name"))
+        sources["seco"] = {
+            "name": "SECO Swiss Sanctions",
+            "available": seco_result.get("available", False),
+            "data": {
+                "screened": seco_result.get("screened"),
+                "match": seco_result.get("match", False),
+                "matched_entry": seco_result.get("matched_entry"),
+                "screened_at": seco_result.get("screened_at"),
+            },
+            "url": "https://www.seco.admin.ch/seco/en/home/Aussenwirtschaftspolitik_Wirtschaftliche_Zusammenarbeit/Wirtschaftsbeziehungen/exportkontrollen-und-sanktionen/sanktionen-embargos.html",
+        }
+
+    # SNB Banking Statistics (Swiss banks)
+    if cp.get("jurisdiction") == "CH" or "FINMA" in (cp.get("regulator","").upper()):
+        snb_result = snb_provider.enrich_counterparty(cp.get("slug",""), cp.get("display_name",""), cp.get("jurisdiction","CH"))
+        sources["snb"] = {
+            "name": "SNB Banking Statistics",
+            "available": snb_result.get("available", False),
+            "data": {k: v for k, v in snb_result.items()
+                     if k not in ("source","available","fetched_at") and v is not None} if snb_result.get("available") else {},
+            "url": "https://data.snb.ch/en/topics/banken",
+        }
+
+    # EBA Register (EU/EEA entities)
+    EU_EEA = {"AT","BE","BG","HR","CY","CZ","DK","EE","FI","FR","DE","GR",
+               "HU","IS","IE","IT","LV","LI","LT","LU","MT","NL","NO","PL",
+               "PT","RO","SK","SI","ES","SE"}
+    if cp.get("jurisdiction","") in EU_EEA:
+        eba_result = eba_provider.enrich_counterparty(cp.get("slug",""), cp.get("display_name",""), cp.get("jurisdiction",""))
+        sources["eba"] = {
+            "name": "EBA Register of Institutions",
+            "available": eba_result.get("available", False),
+            "data": {k: v for k, v in eba_result.items()
+                     if k not in ("source","available","fetched_at","reason") and v is not None} if eba_result.get("available") else {},
+            "url": eba_result.get("eba_url", "https://registers.eba.europa.eu/solrweb/public"),
+        }
 
     # Nansen (on-chain intelligence)
     if cp.get("entity_type") in ("exchange", "custodian", "defi_protocol"):

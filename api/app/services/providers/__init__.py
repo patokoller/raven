@@ -16,7 +16,7 @@ import httpx
 from datetime import datetime
 from typing import Optional
 from app.core.config import settings
-from app.services.providers import defillama, edgar, fca, zefix, finma, uid_gleif, nansen, defillama_cex, sanctions
+from app.services.providers import defillama, edgar, fca, zefix, finma, uid_gleif, nansen, defillama_cex, sanctions, seco, snb, eba
 
 
 def fetch_coingecko_exchange(slug: str) -> dict:
@@ -166,6 +166,18 @@ def build_counterparty_data(cp: dict) -> dict:
         data["_sanctions_hit"]          = True
         print(f"[sanctions] ⚠️ MATCH for {display_name}: {sanctions_result['matched_lists']}")
 
+    # ── 1e. SECO Swiss Sanctions (CH-specific, distinct from OFAC/EU) ───
+    if cp.get("jurisdiction") == "CH" or cp.get("regulator", "").upper().startswith("FINMA"):
+        seco_result = seco.screen(display_name, legal_name=cp.get("legal_name"))
+        if seco_result.get("available"):
+            data["_sources"].append("seco")
+            data["_seco"] = seco_result
+            if seco_result.get("match"):
+                data["license_active"]          = False
+                data["enforcement_actions_12m"] = max(data.get("enforcement_actions_12m", 0), 3)
+                data["_seco_hit"]               = True
+                print(f"[seco] ⚠️ MATCH for {display_name}: {seco_result.get('matched_entry')}")
+
     # ── 2. SEC EDGAR ──────────────────────────────────────────
     edgar_data = edgar.enrich_counterparty(slug)
     if edgar_data.get("available"):
@@ -184,6 +196,30 @@ def build_counterparty_data(cp: dict) -> dict:
                 data.setdefault("license_active", fca_data["license_active"])
             if fca_data.get("enforcement_actions_12m") is not None:
                 data.setdefault("enforcement_actions_12m", fca_data["enforcement_actions_12m"])
+
+    # ── 3a2. EBA Register (EU/EEA entities) ──────────────────────────────────
+    EU_EEA = {"AT","BE","BG","HR","CY","CZ","DK","EE","FI","FR","DE","GR",
+               "HU","IS","IE","IT","LV","LI","LT","LU","MT","NL","NO","PL",
+               "PT","RO","SK","SI","ES","SE"}
+    if cp.get("jurisdiction", "") in EU_EEA:
+        eba_data = eba.enrich_counterparty(slug, display_name, cp.get("jurisdiction", ""))
+        if eba_data.get("available"):
+            data["_sources"].append("eba_register")
+            if eba_data.get("license_active") is not None:
+                data.setdefault("license_active", eba_data["license_active"])
+            if eba_data.get("enforcement_actions_12m") is not None:
+                data.setdefault("enforcement_actions_12m", eba_data["enforcement_actions_12m"])
+            if eba_data.get("years_regulated") is not None:
+                data.setdefault("years_regulated", eba_data["years_regulated"])
+            if eba_data.get("lei"):
+                data.setdefault("lei", eba_data["lei"])
+            data["_eba"] = {
+                "institution_type": eba_data.get("eba_institution_type"),
+                "home_member_state": eba_data.get("eba_home_member_state"),
+                "status": eba_data.get("eba_status"),
+                "auth_date": eba_data.get("eba_auth_date"),
+                "url": eba_data.get("eba_url"),
+            }
 
     # ── 3b. Zefix (Swiss Commercial Register) ─────────────────
     if cp.get("jurisdiction") == "CH" or cp.get("regulator", "").upper().startswith("FINMA"):
