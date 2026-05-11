@@ -38,8 +38,13 @@ async def generate_report_endpoint(
 ):
     try:
         report_id  = str(uuid.uuid4())
-        count      = len(supabase.table("reports").select("report_id").execute().data or [])
-        report_ref = f"RPT-{datetime.utcnow().year}-{count+1:03d}"
+        year       = datetime.utcnow().year
+        existing   = supabase.table("reports").select("report_ref").like("report_ref", f"RPT-{year}-%").execute().data or []
+        report_ref = f"RPT-{year}-{len(existing)+1:03d}"
+        # Ensure uniqueness with uuid suffix if collision
+        check = supabase.table("reports").select("report_id").eq("report_ref", report_ref).execute().data
+        if check:
+            report_ref = f"RPT-{year}-{str(uuid.uuid4())[:6].upper()}"
         title      = body.title or f"Risk Report - {body.report_period}"
 
         result = supabase.table("reports").insert({
