@@ -452,14 +452,11 @@ def apply_to_affected_counterparties(doc_id: str) -> dict:
 
         updates = {"_regulatory_flags": existing_flags + [reg_note]}
 
-        # HIGH impact custodians from FINMA guidance → flag licence issue
-        if impact in ("HIGH", "CRITICAL") and cp.get("entity_type") == "custodian":
+        # Flag is informational — user decides if it affects the score.
+        # No automatic changes to license_active or enforcement_actions_12m.
+        # The _finma_compliance_flag field stores context for the user to review.
+        if impact in ("HIGH", "CRITICAL"):
             updates["_finma_compliance_flag"] = reason
-            # All HIGH/CRITICAL impact custodians fail the FINMA requirement
-            # (the analysis already determined impact level — trust it)
-            updates["license_active"] = False
-            current_ea = existing.get("enforcement_actions_12m")
-            updates["enforcement_actions_12m"] = max(int(current_ea) if current_ea else 0, 1)
 
         merged = {**existing, **updates}
 
