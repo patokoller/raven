@@ -58,7 +58,7 @@ def generate_report(report_id: str, portfolio_id: str, client_id: str):
                 "jurisdiction":    exp.get("jurisdiction", cp_record.get("jurisdiction", "")),
                 "regulator":       exp.get("regulator", cp_record.get("regulator", "")),
                 "value_chf":       round(exp.get("value_chf", 0), 0),
-                "weight_pct":      round((exp.get("pct") or 0) * 100 if exp.get("pct", 0) < 1 else exp.get("pct", 0), 1),
+                "weight_pct":      round(float(exp.get("pct") or 0) * 100 if float(exp.get("pct") or 0) < 1 else float(exp.get("pct") or 0), 1),
                 "risk_tier":       exp.get("tier", cp_record.get("current_risk_tier", "UNKNOWN")),
                 "risk_score":      exp.get("score", 50),
                 "score_delta_7d":  exp.get("delta_7d", 0),
@@ -73,8 +73,9 @@ def generate_report(report_id: str, portfolio_id: str, client_id: str):
         # Positions grouped by custodian
         pos_by_custodian: dict = {}
         for p in positions:
-            cname = p.get("custodian_name", "Unknown")
-            pos_by_custodian.setdefault(cname, []).append({
+            cname = p.get("custodian_name") or p.get("custodian_id") or "Unknown"
+            if isinstance(cname, dict): cname = cname.get("display_name", "Unknown")
+            pos_by_custodian.setdefault(str(cname), []).append({
                 "symbol": p.get("asset_symbol"), "name": p.get("asset_name"),
                 "value_chf": p.get("market_value_chf"), "weight_pct": round((p.get("weight_pct") or 0)*100, 1),
             })
@@ -97,11 +98,11 @@ def generate_report(report_id: str, portfolio_id: str, client_id: str):
         )
 
         # ── Section 01: Executive Summary ─────────────────────────────────────
-        weighted_score = risk.get("weighted_risk_score") or 50
+        weighted_score = float(risk.get("weighted_risk_score") or 50)
         finma_ok       = risk.get("finma_compliant", True)
         alerts_count   = len(open_alerts)
-        conc_warnings  = risk.get("concentration_warnings") or []
-        limit_breaches = risk.get("limit_breaches") or []
+        conc_warnings  = [w for w in (risk.get("concentration_warnings") or []) if isinstance(w, dict)]
+        limit_breaches = [b for b in (risk.get("limit_breaches") or []) if isinstance(b, dict)]
 
         s1 = _call(f"""Write the Executive Summary for a Raven counterparty risk report.
 Raven is a counterparty risk intelligence platform — NOT a portfolio performance tool.
