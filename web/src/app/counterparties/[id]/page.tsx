@@ -616,18 +616,41 @@ export default function CounterpartyDetailPage() {
                 })().map(function(flag: any, i: number) {
                   return (
                     <div key={i} className="px-4 py-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-1">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1.5 flex-wrap">
                             <span className={'text-[10px] font-mono px-1.5 py-0.5 rounded ' + (flag.impact === 'CRITICAL' ? 'bg-red text-white' : flag.impact === 'HIGH' ? 'bg-red/10 text-red' : 'bg-amber/10 text-amber')}>
                               {flag.impact}
                             </span>
-                            <span className="text-xs font-medium text-ink">{flag.doc_ref}</span>
+                            {flag.doc_ref && <span className="text-[10px] font-mono text-ink-mid">{flag.doc_ref}</span>}
+                            <span className="text-[10px] text-ink-mid ml-auto font-mono">
+                              {flag.applied_at ? new Date(flag.applied_at).toLocaleDateString('en-CH') : ''}
+                            </span>
                           </div>
-                          <div className="text-xs text-ink-mid">{flag.reason}</div>
-                        </div>
-                        <div className="text-[10px] text-ink-mid font-mono whitespace-nowrap">
-                          {flag.applied_at ? new Date(flag.applied_at).toLocaleDateString('en-CH') : ''}
+                          <div className="text-xs text-ink-mid mb-3">{flag.reason}</div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={function(e) {
+                                e.stopPropagation()
+                                const updated = (enrich._regulatory_flags || []).filter(function(f: any) {
+                                  return (f.doc_ref || f.reason) !== (flag.doc_ref || flag.reason)
+                                })
+                                update('_regulatory_flags', updated)
+                                setTimeout(function() { save() }, 100)
+                              }}
+                              className="text-[10px] px-2.5 py-1 rounded border border-border text-ink-mid hover:bg-surface-2 transition-colors">
+                              Dismiss — no score impact
+                            </button>
+                            <button
+                              onClick={function(e) {
+                                e.stopPropagation()
+                                const el = document.getElementById('enrichment-regulatory')
+                                if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                              }}
+                              className="text-[10px] px-2.5 py-1 rounded border border-amber/40 text-amber hover:bg-amber/5 transition-colors">
+                              Adjust enrichment fields
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </div>
