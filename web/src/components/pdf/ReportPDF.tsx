@@ -753,7 +753,7 @@ export function ReportPDF({ report, clientName }: ReportPDFProps) {
                 {s7.overall_status}
               </Text>
             </View>
-            <Text style={[styles.bodyText, { marginTop: 8 }]}>{s7.summary}</Text>
+            <Text style={{ fontSize: 8, color: '#4A4A4A', marginTop: 8, lineHeight: 1.5 }}>{s7.summary}</Text>
           </View>
 
           {s7.disclosures.map((d: any, i: number) => (
@@ -767,27 +767,27 @@ export function ReportPDF({ report, clientName }: ReportPDFProps) {
                 d.status === 'non_compliant' ? 'rgba(192,57,43,0.04)' : 'rgba(201,168,76,0.04)',
             }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
-                <Text style={[styles.subHeading, { marginBottom: 0 }]}>{d.counterparty}</Text>
-                <Text style={styles.metaText}>
+                <Text style={styles.subHeading}>{d.counterparty}</Text>
+                <Text style={{ fontSize: 7, color: '#6B6B6B', fontFamily: 'Courier' }}>
                   {d.status === 'compliant' ? 'COMPLIANT' :
                    d.status === 'scenario_b' ? 'SCENARIO B — SRO' :
                    d.status === 'scenario_a' ? 'SCENARIO A — FOREIGN' : 'NON-COMPLIANT'}
-                  {d.aum_chf ? `  ·  CHF ${Number(d.aum_chf).toLocaleString('de-CH', {maximumFractionDigits: 0})}` : ''}
+                  {d.aum_chf ? '  CHF ' + Number(d.aum_chf).toLocaleString('de-CH', {maximumFractionDigits: 0}) : ''}
                 </Text>
               </View>
-              <Text style={styles.bodyText}>{d.narrative}</Text>
+              <Text style={{ fontSize: 8, color: '#4A4A4A', lineHeight: 1.5, marginBottom: 6 }}>{d.narrative}</Text>
               {d.client_actions && d.client_actions.length > 0 && (
-                <>
-                  <Text style={[styles.metaText, { marginTop: 6, marginBottom: 3, fontWeight: 700 }]}>
+                <View>
+                  <Text style={{ fontSize: 7, color: '#6B6B6B', fontFamily: 'Courier', marginBottom: 3 }}>
                     REQUIRED CLIENT ACTIONS
                   </Text>
                   {d.client_actions.map((a: string, j: number) => (
                     <View key={j} style={styles.finding}>
-                      <Text style={[styles.findingBullet, { color: '#C9A84C' }]}>→</Text>
+                      <Text style={[styles.findingBullet, { color: '#C9A84C' }]}>{'→'}</Text>
                       <Text style={styles.findingText}>{a}</Text>
                     </View>
                   ))}
-                </>
+                </View>
               )}
               {d.regulatory_basis && (
                 <Text style={[styles.disclaimer, { marginTop: 6 }]}>{d.regulatory_basis}</Text>
