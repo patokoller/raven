@@ -77,13 +77,30 @@ Max DD 30d: {(m.get('max_drawdown_30d',0) or 0)*100:.1f}% | Score: {m.get('risk_
 
 Return JSON: {{"narrative":"professional interpretation","var_interpretation":"...","volatility_assessment":"...","trend_assessment":"improving|stable|deteriorating with rationale"}}""")
 
-        s4 = _call(f"""Counterparty Analysis for Raven Risk Report.
-Monitored: {len(cps)} | HIGH/CRITICAL: {len(critical_cps)}
-Top custodian: {m.get('top_custodian_name','N/A')} ({(m.get('top_custodian_pct',0) or 0)*100:.0f}% AuM)
-Custodian HHI: {m.get('custodian_hhi',0):.4f}
-Critical entities: {[c['display_name'] for c in critical_cps[:5]]}
+        # Portfolio-specific custodian data
+        portfolio_custodians = []
+        for exp in cp_exposures:
+            cp_record = next((c for c in cps if c.get("counterparty_id") == exp.get("counterparty_id")), {})
+            portfolio_custodians.append({
+                "name":         exp.get("name", "Unknown"),
+                "value_chf":    exp.get("value_chf", 0),
+                "pct":          round((exp.get("pct") or exp.get("value_chf", 0) / nav * 100 if nav else 0), 1),
+                "tier":         exp.get("tier", cp_record.get("current_risk_tier", "UNKNOWN")),
+                "jurisdiction": exp.get("jurisdiction", cp_record.get("jurisdiction", "")),
+                "regulator":    exp.get("regulator", cp_record.get("regulator", "")),
+            })
 
-Return JSON: {{"narrative":"2-3 paragraphs","custodian_concentration_risk":"...","highlighted_concerns":["..."],"watchlist":["..."],"overall_counterparty_assessment":"LOW|MEDIUM|HIGH|CRITICAL"}}""")
+        s4 = _call(f"""Counterparty Analysis for Raven Risk Report.
+Client: {cl.get('display_name')} | Portfolio NAV: CHF {nav:,.0f}
+Portfolio custodians (ONLY analyse these, not all counterparties in the registry):
+{json.dumps(portfolio_custodians, indent=2)}
+FINMA custody status: {s7.get('overall_status', 'NOT COMPUTED')}
+Custodians requiring disclosure: {s7.get('disclosure_custodians', [])}
+Compliant custodians: {s7.get('compliant_custodians', [])}
+
+Focus ONLY on the counterparties listed above. Do NOT reference entities not in this portfolio.
+
+Return JSON: {{"narrative":"2-3 paragraphs focused on the portfolio custodians above","custodian_concentration_risk":"...","highlighted_concerns":["..."],"watchlist":["..."],"overall_counterparty_assessment":"LOW|MEDIUM|HIGH|CRITICAL"}}""")
 
         s5 = _call(f"""Stress Test Results for Raven Risk Report.
 Portfolio NAV: CHF {nav:,.0f}

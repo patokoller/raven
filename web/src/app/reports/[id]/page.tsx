@@ -472,7 +472,7 @@ export default function ReportDetailPage() {
         subtitle={`${report.report_ref} · ${report.report_period} · ${report.status}`}
         action={
           <div className="flex items-center gap-2">
-            {!isDraft && <DownloadButton report={report} clientName="" />}
+            {!isDraft && <DownloadButton report={report} clientName={report.clients?.display_name || report.title || ""} />}
             {isDraft ? (
               <div className="flex items-center gap-2 text-xs text-ink-mid">
                 <Clock className="w-3.5 h-3.5 animate-spin" /> Generating…

@@ -87,7 +87,7 @@ async def list_reports(status: Optional[str] = None, current_user: CurrentUser =
 
 @router.get("/{report_id}")
 async def get_report(report_id: str, current_user: CurrentUser = Depends(get_current_user)):
-    r = supabase.table("reports").select("*").eq("report_id", report_id).single().execute()
+    r = supabase.table("reports").select("*,clients(display_name,client_type)").eq("report_id", report_id).single().execute()
     if not r.data:
         raise HTTPException(status_code=404, detail="Report not found")
     return r.data

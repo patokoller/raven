@@ -443,7 +443,7 @@ export function ReportPDF({ report, clientName }: ReportPDFProps) {
             <View style={styles.coverMeta}>
               <View style={styles.coverMetaItem}>
                 <Text style={styles.coverMetaLabel}>Client</Text>
-                <Text style={styles.coverMetaValue}>{clientName || 'Helvetic Capital AG'}</Text>
+                <Text style={styles.coverMetaValue}>{clientName || report.clients?.display_name || 'Client'}</Text>
               </View>
               <View style={styles.coverMetaItem}>
                 <Text style={styles.coverMetaLabel}>Period</Text>
@@ -734,6 +734,69 @@ export function ReportPDF({ report, clientName }: ReportPDFProps) {
 
         <PageFooter reportRef={report.report_ref} period={report.report_period} />
       </Page>
+
+      {/* ── 07 FINMA CUSTODY DISCLOSURE ── */}
+      {s7 && s7.disclosures && s7.disclosures.length > 0 && (
+        <Page size="A4" style={styles.page}>
+          <SectionTitle num="07" title="FINMA Custody Disclosure" />
+
+          <View style={{ marginBottom: 12 }}>
+            <View style={[styles.badge, {
+              backgroundColor: s7.overall_status === 'COMPLIANT' ? 'rgba(42,124,111,0.12)' :
+                s7.overall_status === 'ACTION REQUIRED' ? 'rgba(192,57,43,0.12)' : 'rgba(245,158,11,0.12)'
+            }]}>
+              <Text style={[styles.badgeText, {
+                color: s7.overall_status === 'COMPLIANT' ? '#2A7C6F' :
+                  s7.overall_status === 'ACTION REQUIRED' ? '#C0392B' : '#B7860B'
+              }]}>
+                {s7.overall_status}
+              </Text>
+            </View>
+            <Text style={[styles.bodyText, { marginTop: 8 }]}>{s7.summary}</Text>
+          </View>
+
+          {s7.disclosures.map((d: any, i: number) => (
+            <View key={i} style={{
+              marginBottom: 12,
+              padding: 10,
+              borderLeft: 3,
+              borderLeftColor: d.status === 'compliant' ? '#2A7C6F' :
+                d.status === 'non_compliant' ? '#C0392B' : '#C9A84C',
+              backgroundColor: d.status === 'compliant' ? 'rgba(42,124,111,0.04)' :
+                d.status === 'non_compliant' ? 'rgba(192,57,43,0.04)' : 'rgba(201,168,76,0.04)',
+            }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                <Text style={[styles.subHeading, { marginBottom: 0 }]}>{d.counterparty}</Text>
+                <Text style={styles.metaText}>
+                  {d.status === 'compliant' ? 'COMPLIANT' :
+                   d.status === 'scenario_b' ? 'SCENARIO B — SRO' :
+                   d.status === 'scenario_a' ? 'SCENARIO A — FOREIGN' : 'NON-COMPLIANT'}
+                  {d.aum_chf ? `  ·  CHF ${Number(d.aum_chf).toLocaleString('de-CH', {maximumFractionDigits: 0})}` : ''}
+                </Text>
+              </View>
+              <Text style={styles.bodyText}>{d.narrative}</Text>
+              {d.client_actions && d.client_actions.length > 0 && (
+                <>
+                  <Text style={[styles.metaText, { marginTop: 6, marginBottom: 3, fontWeight: 700 }]}>
+                    REQUIRED CLIENT ACTIONS
+                  </Text>
+                  {d.client_actions.map((a: string, j: number) => (
+                    <View key={j} style={styles.finding}>
+                      <Text style={[styles.findingBullet, { color: '#C9A84C' }]}>→</Text>
+                      <Text style={styles.findingText}>{a}</Text>
+                    </View>
+                  ))}
+                </>
+              )}
+              {d.regulatory_basis && (
+                <Text style={[styles.disclaimer, { marginTop: 6 }]}>{d.regulatory_basis}</Text>
+              )}
+            </View>
+          ))}
+
+          <PageFooter reportRef={report.report_ref} period={report.report_period} />
+        </Page>
+      )}
     </Document>
   )
 }
