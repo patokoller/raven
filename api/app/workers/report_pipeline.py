@@ -90,6 +90,13 @@ Return JSON: {{"narrative":"professional interpretation","var_interpretation":".
                 "regulator":    exp.get("regulator", cp_record.get("regulator", "")),
             })
 
+        # Section 7: FINMA Custody Compliance Disclosure (computed before s4 so s4 can reference it)
+        s7 = build_portfolio_disclosure(
+            counterparty_exposures=cp_exposures,
+            client_type=client_type,
+            all_counterparties=cps,
+        )
+
         s4 = _call(f"""Counterparty Analysis for Raven Risk Report.
 Client: {cl.get('display_name')} | Portfolio NAV: CHF {nav:,.0f}
 Portfolio custodians (ONLY analyse these, not all counterparties in the registry):
@@ -107,13 +114,6 @@ Portfolio NAV: CHF {nav:,.0f}
 Scenarios: {json.dumps(stress_summary) if stress_summary else "No stress tests run yet — note this clearly and recommend running them."}
 
 Return JSON: {{"narrative":"analysis of stress outcomes","worst_scenario":"name and % impact","resilience_assessment":"...","tail_risk_commentary":"..."}}""")
-
-        # Section 7: FINMA Custody Compliance Disclosure (not AI-generated, rule-based)
-        s7 = build_portfolio_disclosure(
-            counterparty_exposures=cp_exposures,
-            client_type=client_type,
-            all_counterparties=cps,
-        )
 
         s6 = _call(f"""Recommendations for Raven Risk Report.
 Risk tier: {m.get('risk_tier','N/A')} | Top custodian: {(m.get('top_custodian_pct',0) or 0)*100:.0f}%
