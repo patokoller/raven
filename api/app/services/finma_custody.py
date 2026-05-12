@@ -374,12 +374,26 @@ def build_portfolio_disclosure(
         )
     elif disclosure_items:
         overall = "DISCLOSURE REQUIRED"
-        summary = (
-            f"The portfolio includes custodians operating under FINMA Guidance 01/2026 "
-            f"transitional provisions: {', '.join(disclosure_items)}. "
-            f"Client disclosure and{' written consent' if consent_required else ' documentation'} "
-            f"are required under Swiss regulatory obligations."
-        )
+        if client_type == "institutional":
+            summary = (
+                f"The portfolio includes custodians operating under FINMA Guidance 01/2026 "
+                f"transitional provisions: {', '.join(disclosure_items)}. "
+                f"As an institutional client, these custody arrangements should be noted in your "
+                f"internal risk register and reviewed against your investment policy statement."
+            )
+        elif client_type == "qualified_investor":
+            summary = (
+                f"The portfolio includes custodians operating under FINMA Guidance 01/2026 "
+                f"transitional provisions: {', '.join(disclosure_items)}. "
+                f"Client disclosure and documented written consent are required under Swiss regulatory obligations."
+            )
+        else:
+            summary = (
+                f"The portfolio includes custodians operating under FINMA Guidance 01/2026 "
+                f"transitional provisions: {', '.join(disclosure_items)}. "
+                f"As a retail client, comprehensive risk disclosure, presentation of alternative "
+                f"custodians, and written consent are mandatory under Swiss regulatory obligations."
+            )
     else:
         overall = "COMPLIANT"
         summary = (
