@@ -15,7 +15,7 @@ const H = () => ({ Authorization: `Bearer ${localStorage.getItem('raven_token')}
 const SECTIONS = [
   { key: 'executive_summary',     label: 'Executive Summary' },
   { key: 'portfolio_composition', label: 'Portfolio Composition' },
-  { key: 'risk_scorecard',        label: 'Risk Scorecard' },
+  { key: 'risk_scorecard',        label: 'Counterparty Risk Scorecard' },
   { key: 'counterparty_analysis', label: 'Counterparty Analysis' },
   { key: 'stress_test_results',   label: 'Stress Test Results' },
   { key: 'recommendations',       label: 'Recommendations' },

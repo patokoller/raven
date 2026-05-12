@@ -550,38 +550,60 @@ export function ReportPDF({ report, clientName }: ReportPDFProps) {
 
       {/* ── 03 RISK SCORECARD ── */}
       <Page size="A4" style={styles.page}>
-        <SectionTitle num="03" title="Risk Scorecard" />
+        <SectionTitle num="03" title="Counterparty Risk Scorecard" />
 
         {s3 ? (
           <>
             <BodyText>{s3.narrative || ''}</BodyText>
 
-            <View style={styles.metricGrid}>
-              {s3.var_interpretation && (
-                <View style={styles.metricCard}>
-                  <Text style={styles.metricLabel}>Value at Risk</Text>
-                  <Text style={styles.metricSub}>{s3.var_interpretation}</Text>
-                </View>
-              )}
-              {s3.volatility_assessment && (
-                <View style={styles.metricCard}>
-                  <Text style={styles.metricLabel}>Volatility</Text>
-                  <Text style={styles.metricSub}>{s3.volatility_assessment}</Text>
-                </View>
-              )}
-              {s3.sharpe_assessment && (
-                <View style={styles.metricCard}>
-                  <Text style={styles.metricLabel}>Risk-Adjusted Returns</Text>
-                  <Text style={styles.metricSub}>{s3.sharpe_assessment}</Text>
-                </View>
-              )}
-              {s3.trend_assessment && (
-                <View style={styles.metricCard}>
-                  <Text style={styles.metricLabel}>Trend</Text>
-                  <Text style={styles.metricSub}>{s3.trend_assessment}</Text>
-                </View>
-              )}
+            {/* Weighted portfolio score */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12, marginTop: 8 }}>
+              <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: '#2A7C6F', alignItems: 'center', justifyContent: 'center', marginRight: 14 }}>
+                <Text style={{ fontFamily: 'Helvetica-Bold', fontSize: 20, color: 'white' }}>{s3.weighted_portfolio_score}</Text>
+                <Text style={{ fontSize: 7, color: 'rgba(255,255,255,0.7)' }}>/100</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontFamily: 'Helvetica-Bold', fontSize: 11, color: '#1A1A1A', marginBottom: 2 }}>Weighted Counterparty Risk Score</Text>
+                <Text style={{ fontSize: 8, color: '#6B6B6B' }}>Trend: {s3.trend} — {s3.trend_rationale}</Text>
+              </View>
             </View>
+
+            {/* Per-custodian scorecard */}
+            {s3.scorecard_by_custodian?.length > 0 && (
+              <>
+                <View style={styles.divider} />
+                <SubHeading>Per-Custodian Breakdown</SubHeading>
+                {s3.scorecard_by_custodian.map((cp: any, i: number) => {
+                  const tierColor = cp.tier === 'LOW' ? '#2A7C6F' : cp.tier === 'MEDIUM' ? '#B7860B' : cp.tier === 'HIGH' ? '#D35400' : '#C0392B'
+                  return (
+                    <View key={i} style={{ marginBottom: 10, padding: 8, backgroundColor: '#F8F5EE', borderRadius: 4, borderLeft: 3, borderLeftColor: tierColor }}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                        <Text style={{ fontFamily: 'Helvetica-Bold', fontSize: 9, color: '#1A1A1A' }}>{cp.name}</Text>
+                        <View style={{ flexDirection: 'row', gap: 8 }}>
+                          <Text style={{ fontSize: 8, fontFamily: 'Courier', color: tierColor }}>{cp.tier}</Text>
+                          <Text style={{ fontSize: 8, fontFamily: 'Helvetica-Bold', color: '#1A1A1A' }}>{cp.overall_score}/100</Text>
+                        </View>
+                      </View>
+                      <View style={{ flexDirection: 'row', gap: 4, marginBottom: 4 }}>
+                        {[
+                          ['Regulatory', 25], ['Financial', 20], ['Operational', 20],
+                          ['Liquidity', 15], ['On-Chain', 10], ['Reputation', 10]
+                        ].map(([dim, weight]: any) => (
+                          <View key={dim} style={{ flex: 1, alignItems: 'center' }}>
+                            <Text style={{ fontSize: 5.5, color: '#6B6B6B', marginBottom: 1 }}>{dim}</Text>
+                            <Text style={{ fontSize: 7, fontFamily: 'Helvetica-Bold', color: '#1A1A1A' }}>—</Text>
+                            <Text style={{ fontSize: 5.5, color: '#9B9B9B' }}>{weight}%</Text>
+                          </View>
+                        ))}
+                      </View>
+                      {cp.key_risk && (
+                        <Text style={{ fontSize: 7.5, color: '#4A4A4A', fontStyle: 'italic' }}>Key risk: {cp.key_risk}</Text>
+                      )}
+                    </View>
+                  )
+                })}
+              </>
+            )}
           </>
         ) : (
           <BodyText>This section was not generated.</BodyText>
