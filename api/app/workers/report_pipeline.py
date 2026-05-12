@@ -111,6 +111,13 @@ def generate_report(report_id: str, portfolio_id: str, client_id: str):
                 "delta_7d":     round(_safe(exp.get("delta_7d"), 0), 1),
             })
 
+        # ── Pre-compute all JSON strings used in f-string prompts ───────────
+        # CRITICAL: dict literals CANNOT be inside f-strings ({{ }} is a set in Python)
+        # All list-of-dicts must be serialized BEFORE the f-string.
+        custodians_json   = _j(portfolio_custodians)
+        custodians_brief  = _j([{"name": c["name"], "tier": c["risk_tier"], "weight_pct": c["weight_pct"]} for c in portfolio_custodians])
+        custodian_summary = _j([{"name": c["name"], "value_chf": c["value_chf"], "weight_pct": c["weight_pct"], "tier": c["risk_tier"]} for c in portfolio_custodians])
+
         # ── Positions grouped by custodian ─────────────────────────────────
         pos_by_custodian: dict = {}
         for p in positions:
@@ -135,6 +142,9 @@ def generate_report(report_id: str, portfolio_id: str, client_id: str):
                 "pnl_chf":  round(_safe(r.get("portfolio_pnl_chf"), 0)),
             })
 
+        pos_json    = _j(pos_by_custodian)
+        stress_json = _j(stress_summary) if stress_summary else "None run yet"
+
         # ── Risk metrics (all safe) ────────────────────────────────────────
         weighted_score  = round(_safe(risk.get("weighted_risk_score"), 50))
         finma_ok        = bool(risk.get("finma_compliant", True))
@@ -145,6 +155,8 @@ def generate_report(report_id: str, portfolio_id: str, client_id: str):
         warn_names      = [_safe_str(w.get("name")) for w in conc_warnings]
         custodian_names = [c["name"] for c in portfolio_custodians]
         custodian_tiers = [f"{c['name']} ({c['risk_tier']}, {c['risk_score']}/100)" for c in portfolio_custodians]
+
+        conc_json = _j(conc_warnings)
 
         # ── FINMA Custody Disclosure (s7) — computed first ─────────────────
         s7 = build_portfolio_disclosure(
@@ -174,8 +186,6 @@ Open alerts: {alerts_count} | Concentration warnings: {warn_names} | Limit breac
 Return JSON: {{"headline":"one sentence","key_findings":["..."],"overall_assessment":"2-3 paragraphs on counterparty risk only","immediate_actions":["..."],"risk_indicator":"GREEN|AMBER|RED"}}""")
 
         # ── Section 02: Portfolio & Custody Composition ────────────────────
-        custodian_summary = _j([{"name":c["name"],"value_chf":c["value_chf"],"weight_pct":c["weight_pct"],"tier":c["risk_tier"]} for c in portfolio_custodians])
-        pos_json = _j(pos_by_custodian)
         s2 = _call(f"""Portfolio Composition — Raven Counterparty Risk Report.
 Focus on which custodian holds what. Not asset performance.
 
@@ -192,7 +202,7 @@ The 6 scoring dimensions are: Regulatory (25%), Financial (20%), Operational (20
 
 Portfolio weighted score: {weighted_score}/100
 FINMA compliant: {'YES' if finma_ok else 'NO'}
-Custodians: {_j(portfolio_custodians)}
+Custodians: {custodians_json}
 
 Return JSON: {{"narrative":"2 paragraphs interpreting counterparty risk scores","scorecard_by_custodian":[{{"name":"...","overall_score":0,"tier":"...","strongest_dimension":"...","weakest_dimension":"...","key_risk":"..."}}],"weighted_portfolio_score":{weighted_score},"trend":"improving|stable|deteriorating","trend_rationale":"..."}}""")
 
@@ -201,7 +211,7 @@ Return JSON: {{"narrative":"2 paragraphs interpreting counterparty risk scores",
 Analyse ONLY the custodians listed below. Do NOT reference other entities.
 
 Client: {cl.get('display_name')} | AUM: CHF {nav:,.0f}
-Custodians: {_j(portfolio_custodians)}
+Custodians: {custodians_json}
 FINMA status: {finma_status}
 Disclosure required for: {disclosure_cps}
 Compliant: {compliant_cps}
@@ -215,7 +225,7 @@ Return JSON: {{"narrative":"2-3 paragraphs","custodian_concentration_risk":"..."
 Focus on custody and counterparty failure scenarios.
 
 Portfolio NAV: CHF {nav:,.0f} | Custodians: {custodian_names}
-Executed scenarios: {_j(stress_summary) if stress_summary else "None run yet"}
+Executed scenarios: {stress_json}
 
 Return JSON: {{"narrative":"...","worst_scenario":"...","resilience_assessment":"...","tail_risk_commentary":"..."}}""")
 
