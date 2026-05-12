@@ -34,7 +34,7 @@ def generate_report(report_id: str, portfolio_id: str, client_id: str):
         portfolio   = supabase.table("portfolios").select("*").eq("portfolio_id", portfolio_id).single().execute().data
         positions   = supabase.table("portfolio_positions").select("*").eq("portfolio_id", portfolio_id).order("market_value_chf", desc=True).limit(20).execute().data
         cl          = supabase.table("clients").select("*").eq("client_id", client_id).single().execute().data
-        stress      = supabase.table("stress_test_results").select("*, stress_scenarios(display_name,category,description)").eq("portfolio_id", portfolio_id).order("run_at", desc=True).limit(8).execute().data
+        stress      = supabase.table("stress_test_results").select("*, stress_scenarios(display_name)").eq("portfolio_id", portfolio_id).order("run_at", desc=True).limit(8).execute().data
         cps         = supabase.table("counterparties").select("counterparty_id,slug,display_name,entity_type,jurisdiction,regulator,current_risk_tier,latest_score_id,finma_custody_status,enrichment_data").eq("tenant_id", settings.DEFAULT_TENANT_ID).execute().data
         open_alerts = supabase.table("alerts").select("title,severity,alert_type").eq("portfolio_id", portfolio_id).in_("status", ["OPEN","ACKNOWLEDGED"]).execute().data
 
@@ -85,7 +85,6 @@ def generate_report(report_id: str, portfolio_id: str, client_id: str):
             sc = r.get("stress_scenarios") or {}
             stress_summary.append({
                 "scenario":  sc.get("display_name", "?"),
-                "category":  sc.get("category", ""),
                 "pnl_pct":   round((r.get("portfolio_pnl_pct") or 0)*100, 1),
                 "pnl_chf":   round(r.get("portfolio_pnl_chf") or 0, 0),
             })
