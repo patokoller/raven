@@ -4,6 +4,7 @@ import json
 from datetime import datetime
 from anthropic import Anthropic
 from app.core.database import supabase
+from app.services.finma_custody import build_portfolio_disclosure, classify_custody_status
 from app.core.config import settings
 
 client = Anthropic(api_key=settings.ANTHROPIC_API_KEY)
@@ -35,10 +36,14 @@ def generate_report(report_id: str, portfolio_id: str, client_id: str):
         metrics   = supabase.table("portfolio_metrics").select("*").eq("portfolio_id", portfolio_id).order("computed_at", desc=True).limit(1).execute().data
         cl        = supabase.table("clients").select("*").eq("client_id", client_id).single().execute().data
         stress    = supabase.table("stress_test_results").select("*, stress_scenarios(display_name)").eq("portfolio_id", portfolio_id).order("run_at", desc=True).limit(5).execute().data
-        cps       = supabase.table("counterparties").select("counterparty_id,display_name,entity_type,current_risk_tier,latest_score_id").eq("tenant_id", settings.DEFAULT_TENANT_ID).execute().data
+        cps       = supabase.table("counterparties").select("counterparty_id,slug,display_name,entity_type,jurisdiction,regulator,current_risk_tier,latest_score_id,finma_custody_status,enrichment_data").eq("tenant_id", settings.DEFAULT_TENANT_ID).execute().data
         open_alerts = supabase.table("alerts").select("title,severity").eq("tenant_id", settings.DEFAULT_TENANT_ID).in_("status", ["OPEN","ACKNOWLEDGED"]).execute().data
 
         m   = metrics[0] if metrics else {}
+        client_type = cl.get("client_type") or "qualified_investor"
+        # Fetch counterparty exposures from portfolio risk cache for custody disclosure
+        risk_cache = supabase.table("portfolio_risk_cache").select("counterparty_exposures").eq("portfolio_id", portfolio_id).execute().data
+        cp_exposures = (risk_cache[0].get("counterparty_exposures") or []) if risk_cache else []
         nav = portfolio.get("total_nav_chf", 0) or 0
         top10 = [{"symbol": p["asset_symbol"], "class": p["asset_class"],
                   "weight_pct": round((p.get("weight_pct") or 0)*100, 1),
@@ -86,6 +91,13 @@ Scenarios: {json.dumps(stress_summary) if stress_summary else "No stress tests r
 
 Return JSON: {{"narrative":"analysis of stress outcomes","worst_scenario":"name and % impact","resilience_assessment":"...","tail_risk_commentary":"..."}}""")
 
+        # Section 7: FINMA Custody Compliance Disclosure (not AI-generated, rule-based)
+        s7 = build_portfolio_disclosure(
+            counterparty_exposures=cp_exposures,
+            client_type=client_type,
+            all_counterparties=cps,
+        )
+
         s6 = _call(f"""Recommendations for Raven Risk Report.
 Risk tier: {m.get('risk_tier','N/A')} | Top custodian: {(m.get('top_custodian_pct',0) or 0)*100:.0f}%
 Open alerts: {len(open_alerts)} | HIGH/CRITICAL CPs: {len(critical_cps)}
@@ -105,6 +117,7 @@ Return JSON: {{
             "section_counterparty_analysis": s4,
             "section_stress_test_results":   s5,
             "section_recommendations":       s6,
+            "section_regulatory_disclosure": s7,
             "status": "IN_REVIEW",
             "generation_completed_at": datetime.utcnow().isoformat(),
             "model_version": settings.ANTHROPIC_MODEL,

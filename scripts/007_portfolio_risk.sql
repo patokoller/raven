@@ -77,3 +77,17 @@ ALTER TABLE portfolio_risk_cache
 -- Add counterparty_exposures column to cache (run if missing)
 ALTER TABLE portfolio_risk_cache
   ADD COLUMN IF NOT EXISTS counterparty_exposures JSONB DEFAULT '[]';
+
+-- Add client_type for FINMA regulatory classification
+ALTER TABLE clients
+  ADD COLUMN IF NOT EXISTS client_type TEXT DEFAULT 'qualified_investor'
+  CHECK (client_type IN ('retail','qualified_investor','institutional'));
+
+-- Add FINMA custody compliance status to counterparties
+ALTER TABLE counterparties
+  ADD COLUMN IF NOT EXISTS finma_custody_status TEXT DEFAULT NULL
+  CHECK (finma_custody_status IN ('compliant','scenario_a','scenario_b','non_compliant'));
+
+-- Add regulatory disclosure section to reports
+ALTER TABLE reports
+  ADD COLUMN IF NOT EXISTS section_regulatory_disclosure JSONB;

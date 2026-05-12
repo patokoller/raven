@@ -19,6 +19,7 @@ const SECTIONS = [
   { key: 'counterparty_analysis', label: 'Counterparty Analysis' },
   { key: 'stress_test_results',   label: 'Stress Test Results' },
   { key: 'recommendations',       label: 'Recommendations' },
+  { key: 'regulatory_disclosure',   label: 'FINMA Custody Disclosure' },
 ]
 
 // ── Prose renderer — turns any section JSON into readable content ─────────────
@@ -274,6 +275,71 @@ function SectionContent({ sectionKey, data }: { sectionKey: string; data: any })
       )}
     </>
   )
+
+  if (sectionKey === 'regulatory_disclosure') {
+    const overall = data.overall_status || 'UNKNOWN'
+    const statusColor = overall === 'COMPLIANT' ? 'text-teal bg-teal/10' :
+                        overall === 'DISCLOSURE REQUIRED' ? 'text-amber bg-amber/10' :
+                        'text-red bg-red/10'
+    return (
+      <>
+        <div className="mb-4 flex items-center gap-3">
+          <span className={`text-xs font-mono px-2.5 py-1 rounded font-semibold ${statusColor}`}>
+            {overall}
+          </span>
+          <span className="text-xs text-ink-mid">Client type: {data.client_type?.replace('_',' ')}</span>
+          {data.total_aum_at_risk_chf > 0 && (
+            <span className="text-xs text-amber font-mono">
+              CHF {Number(data.total_aum_at_risk_chf).toLocaleString('de-CH',{maximumFractionDigits:0})} subject to disclosure
+            </span>
+          )}
+        </div>
+        <Prose text={data.summary} />
+        {(data.disclosures || []).map(function(d: any, i: number) {
+          if (d.status === 'compliant') return (
+            <div key={i} className="mt-4 p-4 bg-teal/5 rounded border border-teal/20">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-[10px] font-mono bg-teal/10 text-teal px-1.5 py-0.5 rounded">COMPLIANT</span>
+                <span className="text-sm font-medium text-ink">{d.counterparty}</span>
+              </div>
+              <p className="text-xs text-ink-mid leading-relaxed">{d.narrative}</p>
+            </div>
+          )
+          const borderColor = d.status === 'non_compliant' ? 'border-red/30 bg-red/5' : 'border-amber/30 bg-amber/5'
+          const badgeColor  = d.status === 'non_compliant' ? 'bg-red/10 text-red' : 'bg-amber/10 text-amber'
+          const badgeLabel  = d.status === 'non_compliant' ? 'NON-COMPLIANT' :
+                              d.status === 'scenario_b' ? 'SCENARIO B — SRO' : 'SCENARIO A — FOREIGN'
+          return (
+            <div key={i} className={`mt-4 p-4 rounded border ${borderColor}`}>
+              <div className="flex items-center gap-2 mb-2">
+                <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${badgeColor}`}>{badgeLabel}</span>
+                <span className="text-sm font-medium text-ink">{d.counterparty}</span>
+                {d.aum_chf && (
+                  <span className="text-xs font-mono text-ink-mid ml-auto">
+                    CHF {Number(d.aum_chf).toLocaleString('de-CH',{maximumFractionDigits:0})}
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-ink-mid leading-relaxed whitespace-pre-line mb-3">{d.narrative}</p>
+              {d.client_actions?.length > 0 && (
+                <div>
+                  <div className="text-[10px] font-mono text-ink-mid uppercase tracking-wider mb-2">Required Client Actions</div>
+                  <ul className="space-y-1">
+                    {d.client_actions.map(function(a: string, j: number) {
+                      return <li key={j} className="text-xs text-ink flex gap-2"><span className="text-amber mt-0.5">→</span>{a}</li>
+                    })}
+                  </ul>
+                </div>
+              )}
+              {d.regulatory_basis && (
+                <p className="text-[10px] text-ink-mid mt-3 pt-2 border-t border-current/10 italic">{d.regulatory_basis}</p>
+              )}
+            </div>
+          )
+        })}
+      </>
+    )
+  }
 
   // Fallback for any unexpected structure
   const mainText = data.narrative || data.overall_assessment || data.text || ''
