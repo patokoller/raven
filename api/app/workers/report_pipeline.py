@@ -1,212 +1,235 @@
-"""Raven — Report Generation Pipeline (no Celery)"""
+"""Raven — Report Generation Pipeline"""
 
 import json
+import traceback
 from datetime import datetime
+from decimal import Decimal
 from anthropic import Anthropic
 from app.core.database import supabase
-from app.services.finma_custody import build_portfolio_disclosure, classify_custody_status
+from app.services.finma_custody import build_portfolio_disclosure
 from app.core.config import settings
 
 client = Anthropic(api_key=settings.ANTHROPIC_API_KEY)
 
-SYSTEM = """You are the Report Generation Agent for Raven, a Swiss institutional digital asset risk platform.
+SYSTEM = """You are the Report Generation Agent for Raven, a Swiss institutional digital asset counterparty risk platform.
 You write in the style of a Tier 1 Swiss private bank: precise, professional, evidence-backed.
-FINMA-aligned terminology. Figures in CHF unless noted. Output ONLY valid JSON, no preamble."""
+FINMA-aligned. Figures in CHF unless noted. Output ONLY valid JSON, no preamble, no markdown."""
+
+
+class _Encoder(json.JSONEncoder):
+    """Handle Decimal and datetime from PostgreSQL."""
+    def default(self, o):
+        if isinstance(o, Decimal): return float(o)
+        if isinstance(o, datetime): return o.isoformat()
+        return super().default(o)
+
+
+def _j(obj) -> str:
+    """Safe JSON serialization."""
+    return json.dumps(obj, cls=_Encoder, ensure_ascii=False)
+
+
+def _safe(val, fallback=0):
+    """Convert any numeric-ish value to float safely."""
+    if val is None: return fallback
+    if isinstance(val, dict): return fallback
+    if isinstance(val, list): return fallback
+    try: return float(val)
+    except Exception: return fallback
+
+
+def _safe_str(val, fallback="") -> str:
+    """Convert anything to a safe string."""
+    if val is None: return fallback
+    if isinstance(val, dict): return fallback
+    if isinstance(val, list): return fallback
+    return str(val)
 
 
 def _call(prompt: str) -> dict:
+    """Call Claude and parse JSON response."""
     r = client.messages.create(
         model=settings.ANTHROPIC_MODEL,
-        max_tokens=3000,
+        max_tokens=2000,
         system=SYSTEM,
         messages=[{"role": "user", "content": prompt}],
     )
-    text = r.content[0].text
-    for tag in ["```json", "```"]:
-        if tag in text:
-            text = text.split(tag)[1].split("```")[0].strip()
-            break
-    return json.loads(text)
+    text = r.content[0].text.strip()
+    # Strip markdown fences if present
+    if "```" in text:
+        parts = text.split("```")
+        for part in parts:
+            part = part.strip()
+            if part.startswith("json"):
+                part = part[4:].strip()
+            if part.startswith("{") or part.startswith("["):
+                text = part
+                break
+    try:
+        return json.loads(text)
+    except Exception:
+        # Return a minimal valid dict so the report doesn't crash
+        return {"narrative": text[:500], "error": "json_parse_failed"}
 
 
 def generate_report(report_id: str, portfolio_id: str, client_id: str):
     try:
-        portfolio   = supabase.table("portfolios").select("*").eq("portfolio_id", portfolio_id).single().execute().data
-        positions   = supabase.table("portfolio_positions").select("*").eq("portfolio_id", portfolio_id).order("market_value_chf", desc=True).limit(20).execute().data
-        cl          = supabase.table("clients").select("*").eq("client_id", client_id).single().execute().data
-        stress      = supabase.table("stress_test_results").select("*, stress_scenarios(display_name)").eq("portfolio_id", portfolio_id).order("run_at", desc=True).limit(8).execute().data
-        cps         = supabase.table("counterparties").select("counterparty_id,slug,display_name,entity_type,jurisdiction,regulator,current_risk_tier,latest_score_id,finma_custody_status,enrichment_data").eq("tenant_id", settings.DEFAULT_TENANT_ID).execute().data
-        open_alerts = supabase.table("alerts").select("title,severity,alert_type").eq("tenant_id", settings.DEFAULT_TENANT_ID).in_("status", ["OPEN","ACKNOWLEDGED"]).execute().data
+        # ── Fetch data ─────────────────────────────────────────────────────
+        portfolio = supabase.table("portfolios").select("*").eq("portfolio_id", portfolio_id).single().execute().data or {}
+        positions = supabase.table("portfolio_positions").select("*").eq("portfolio_id", portfolio_id).order("market_value_chf", desc=True).limit(20).execute().data or []
+        cl        = supabase.table("clients").select("*").eq("client_id", client_id).single().execute().data or {}
+        stress_r  = supabase.table("stress_test_results").select("*, stress_scenarios(display_name)").eq("portfolio_id", portfolio_id).order("run_at", desc=True).limit(8).execute().data or []
+        cps_raw   = supabase.table("counterparties").select("counterparty_id,slug,display_name,entity_type,jurisdiction,regulator,current_risk_tier,finma_custody_status,enrichment_data").eq("tenant_id", settings.DEFAULT_TENANT_ID).execute().data or []
+        alerts    = supabase.table("alerts").select("title,severity,alert_type").eq("tenant_id", settings.DEFAULT_TENANT_ID).in_("status", ["OPEN","ACKNOWLEDGED"]).execute().data or []
 
-        client_type = cl.get("client_type") or "qualified_investor"
-        nav         = portfolio.get("total_nav_chf", 0) or 0
+        # Strip enrichment_data from cps to avoid JSONB serialization issues in f-strings
+        # Keep it only for finma_custody lookups
+        cps_light = [{k: v for k, v in cp.items() if k != "enrichment_data"} for cp in cps_raw]
 
-        # Counterparty risk cache — the heart of Raven
-        risk_cache   = supabase.table("portfolio_risk_cache").select("*").eq("portfolio_id", portfolio_id).execute().data
-        risk         = risk_cache[0] if risk_cache else {}
-        cp_exposures = risk.get("counterparty_exposures") or []
+        client_type = _safe_str(cl.get("client_type"), "qualified_investor")
+        nav         = _safe(portfolio.get("total_nav_chf"), 0)
 
-        # Build portfolio custodian summary (only custodians in this portfolio)
+        # Risk cache
+        risk_rows  = supabase.table("portfolio_risk_cache").select("*").eq("portfolio_id", portfolio_id).execute().data or []
+        risk       = risk_rows[0] if risk_rows else {}
+        cp_exposures_raw = risk.get("counterparty_exposures") or []
+        # Ensure cp_exposures is a list of dicts
+        cp_exposures = [e for e in cp_exposures_raw if isinstance(e, dict)]
+
+        # ── Build custodian summary (safe types only) ──────────────────────
         portfolio_custodians = []
         for exp in cp_exposures:
-            cp_record = next((c for c in cps if c.get("counterparty_id") == exp.get("counterparty_id")), {})
-            enrich    = cp_record.get("enrichment_data") or {}
-            score_data = enrich.get("_scores") or {}
             portfolio_custodians.append({
-                "name":            exp.get("name", "Unknown"),
-                "entity_type":     exp.get("entity_type", cp_record.get("entity_type", "")),
-                "jurisdiction":    exp.get("jurisdiction", cp_record.get("jurisdiction", "")),
-                "regulator":       exp.get("regulator", cp_record.get("regulator", "")),
-                "value_chf":       round(exp.get("value_chf", 0), 0),
-                "weight_pct":      round(float(exp.get("pct") or 0) * 100 if float(exp.get("pct") or 0) < 1 else float(exp.get("pct") or 0), 1),
-                "risk_tier":       exp.get("tier", cp_record.get("current_risk_tier", "UNKNOWN")),
-                "risk_score":      exp.get("score", 50),
-                "score_delta_7d":  exp.get("delta_7d", 0),
-                "regulatory_dim":  score_data.get("regulatory", 50),
-                "financial_dim":   score_data.get("financial", 50),
-                "operational_dim": score_data.get("operational", 50),
-                "liquidity_dim":   score_data.get("liquidity", 50),
-                "onchain_dim":     score_data.get("onchain", 50),
-                "reputation_dim":  score_data.get("reputation", 50),
+                "name":         _safe_str(exp.get("name"), "Unknown"),
+                "entity_type":  _safe_str(exp.get("entity_type"), ""),
+                "jurisdiction": _safe_str(exp.get("jurisdiction"), ""),
+                "regulator":    _safe_str(exp.get("regulator"), ""),
+                "value_chf":    round(_safe(exp.get("value_chf"), 0)),
+                "weight_pct":   round(_safe(exp.get("pct"), 0) * 100 if _safe(exp.get("pct"), 0) < 1 else _safe(exp.get("pct"), 0), 1),
+                "risk_tier":    _safe_str(exp.get("tier"), "UNKNOWN"),
+                "risk_score":   round(_safe(exp.get("score"), 50)),
+                "delta_7d":     round(_safe(exp.get("delta_7d"), 0), 1),
             })
 
-        # Positions grouped by custodian
+        # ── Positions grouped by custodian ─────────────────────────────────
         pos_by_custodian: dict = {}
         for p in positions:
-            cname = p.get("custodian_name") or p.get("custodian_id") or "Unknown"
-            if isinstance(cname, dict): cname = cname.get("display_name", "Unknown")
-            pos_by_custodian.setdefault(str(cname), []).append({
-                "symbol": p.get("asset_symbol"), "name": p.get("asset_name"),
-                "value_chf": p.get("market_value_chf"), "weight_pct": round((p.get("weight_pct") or 0)*100, 1),
+            cname = p.get("custodian_name") or "Unknown"
+            if not isinstance(cname, str):
+                cname = "Unknown"
+            pos_by_custodian.setdefault(cname, []).append({
+                "symbol":     _safe_str(p.get("asset_symbol")),
+                "name":       _safe_str(p.get("asset_name")),
+                "value_chf":  round(_safe(p.get("market_value_chf"), 0)),
+                "weight_pct": round(_safe(p.get("weight_pct"), 0) * 100, 1),
             })
 
-        # Stress summary focused on counterparty scenarios
+        # ── Stress test summary ────────────────────────────────────────────
         stress_summary = []
-        for r in stress:
-            sc = r.get("stress_scenarios") or {}
+        for r in stress_r:
+            sc = r.get("stress_scenarios")
+            if not isinstance(sc, dict): sc = {}
             stress_summary.append({
-                "scenario":  sc.get("display_name", "?"),
-                "pnl_pct":   round((r.get("portfolio_pnl_pct") or 0)*100, 1),
-                "pnl_chf":   round(r.get("portfolio_pnl_chf") or 0, 0),
+                "scenario": _safe_str(sc.get("display_name"), "?"),
+                "pnl_pct":  round(_safe(r.get("portfolio_pnl_pct"), 0) * 100, 1),
+                "pnl_chf":  round(_safe(r.get("portfolio_pnl_chf"), 0)),
             })
 
-        # FINMA custody disclosure (computed early — used in multiple sections)
+        # ── Risk metrics (all safe) ────────────────────────────────────────
+        weighted_score  = round(_safe(risk.get("weighted_risk_score"), 50))
+        finma_ok        = bool(risk.get("finma_compliant", True))
+        conc_warnings   = [w for w in (risk.get("concentration_warnings") or []) if isinstance(w, dict)]
+        limit_breaches  = [b for b in (risk.get("limit_breaches") or []) if isinstance(b, dict)]
+        alerts_count    = len(alerts)
+        alert_titles    = [_safe_str(a.get("title")) for a in alerts]
+        warn_names      = [_safe_str(w.get("name")) for w in conc_warnings]
+        custodian_names = [c["name"] for c in portfolio_custodians]
+        custodian_tiers = [f"{c['name']} ({c['risk_tier']}, {c['risk_score']}/100)" for c in portfolio_custodians]
+
+        # ── FINMA Custody Disclosure (s7) — computed first ─────────────────
         s7 = build_portfolio_disclosure(
             counterparty_exposures=cp_exposures,
             client_type=client_type,
-            all_counterparties=cps,
+            all_counterparties=cps_raw,  # full records needed for custody classification
         )
+        # Ensure s7 is JSON-safe
+        s7_json = json.loads(_j(s7))
 
-        # ── Section 01: Executive Summary ─────────────────────────────────────
-        weighted_score = float(risk.get("weighted_risk_score") or 50)
-        finma_ok       = risk.get("finma_compliant", True)
-        alerts_count   = len(open_alerts)
-        conc_warnings  = [w for w in (risk.get("concentration_warnings") or []) if isinstance(w, dict)]
-        limit_breaches = [b for b in (risk.get("limit_breaches") or []) if isinstance(b, dict)]
+        finma_status     = _safe_str(s7_json.get("overall_status"), "UNKNOWN")
+        disclosure_cps   = s7_json.get("disclosure_custodians", [])
+        compliant_cps    = s7_json.get("compliant_custodians", [])
+        consent_required = bool(s7_json.get("consent_required", False))
 
-        s1 = _call(f"""Write the Executive Summary for a Raven counterparty risk report.
-Raven is a counterparty risk intelligence platform — NOT a portfolio performance tool.
-Do NOT mention VaR, Sharpe ratio, volatility, or drawdown. Focus entirely on counterparty risk.
+        # ── Section 01: Executive Summary ─────────────────────────────────
+        s1 = _call(f"""Executive Summary — Raven Counterparty Risk Report.
+Do NOT mention VaR, Sharpe ratio, volatility, or drawdown.
 
 Client: {cl.get('display_name')} ({client_type.replace('_',' ')}) | AUM: CHF {nav:,.0f}
 Date: {datetime.utcnow().strftime('%d %B %Y')}
-Weighted Counterparty Risk Score: {weighted_score:.0f}/100
-FINMA Guidance 01/2026 compliance: {'COMPLIANT' if finma_ok else 'NON-COMPLIANT — disclosure required'}
-FINMA custody status: {s7.get('overall_status','UNKNOWN')}
-Custodians in portfolio: {[c['name'] for c in portfolio_custodians]}
-Custodians by risk tier: {[f"{c['name']} ({c['risk_tier']}, score {c['risk_score']:.0f})" for c in portfolio_custodians]}
-Open alerts: {alerts_count}
-Concentration warnings: {[w.get('name') for w in conc_warnings]}
-Limit breaches: {len(limit_breaches)}
+Weighted Counterparty Risk Score: {weighted_score}/100
+FINMA 01/2026 custody status: {finma_status}
+Custodians: {custodian_tiers}
+Open alerts: {alerts_count} | Concentration warnings: {warn_names} | Limit breaches: {len(limit_breaches)}
 
-Return JSON: {{"headline":"one sentence counterparty risk summary","key_findings":["4-5 findings about counterparty risk, FINMA status, concentration"],"overall_assessment":"2-3 paragraphs on counterparty risk — no market risk metrics","immediate_actions":["2-3 counterparty-specific actions"],"risk_indicator":"GREEN|AMBER|RED"}}""")
+Return JSON: {{"headline":"one sentence","key_findings":["..."],"overall_assessment":"2-3 paragraphs on counterparty risk only","immediate_actions":["..."],"risk_indicator":"GREEN|AMBER|RED"}}""")
 
-        # ── Section 02: Portfolio & Custody Composition ────────────────────────
-        s2 = _call(f"""Write the Portfolio Composition section for a Raven counterparty risk report.
-Focus on WHICH CUSTODIAN holds WHAT — not asset performance.
+        # ── Section 02: Portfolio & Custody Composition ────────────────────
+        s2 = _call(f"""Portfolio Composition — Raven Counterparty Risk Report.
+Focus on which custodian holds what. Not asset performance.
 
 Client: {cl.get('display_name')} | AUM: CHF {nav:,.0f}
-Positions by custodian:
-{json.dumps(pos_by_custodian, indent=2)}
-Custodian concentration:
-{json.dumps([{{'name':c['name'],'value_chf':c['value_chf'],'weight_pct':c['weight_pct'],'tier':c['risk_tier']}} for c in portfolio_custodians], indent=2)}
+Positions by custodian: {_j(pos_by_custodian)}
+Custodian summary: {_j(portfolio_custodians)}
 
-Focus on: what assets sit with which custodian, concentration by custodian, custody risk implications.
-Do NOT focus on asset performance, returns, or market risk.
+Return JSON: {{"narrative":"2 paragraphs on custody structure","concentration_assessment":"...","key_exposures":["..."],"diversification_score":"LOW|MEDIUM|HIGH"}}""")
 
-Return JSON: {{"narrative":"2 paragraphs on custody structure and asset allocation by custodian","concentration_assessment":"custodian concentration analysis","key_exposures":["custody-focused exposure points"],"diversification_score":"LOW|MEDIUM|HIGH"}}""")
+        # ── Section 03: Counterparty Risk Scorecard ────────────────────────
+        s3 = _call(f"""Counterparty Risk Scorecard — Raven Report.
+This is a counterparty risk report, not a market risk report.
+The 6 scoring dimensions are: Regulatory (25%), Financial (20%), Operational (20%), Liquidity (15%), On-Chain (10%), Reputation (10%).
 
-        # ── Section 03: Counterparty Risk Scorecard ────────────────────────────
-        s3 = _call(f"""Write the Counterparty Risk Scorecard section for a Raven report.
-This replaces the traditional market risk scorecard. Focus on the 6 counterparty risk dimensions.
-
-Portfolio weighted counterparty risk score: {weighted_score:.0f}/100
+Portfolio weighted score: {weighted_score}/100
 FINMA compliant: {'YES' if finma_ok else 'NO'}
-Counterparties:
-{json.dumps(portfolio_custodians, indent=2)}
+Custodians: {_j(portfolio_custodians)}
 
-For each counterparty interpret their scores across 6 dimensions (0-100, higher=safer):
-- Regulatory Standing (25%): licence status, enforcement actions, FINMA supervision
-- Financial Strength (20%): capital, audits, proof of reserves
-- Operational Resilience (20%): security, uptime, certifications
-- Liquidity & Reserves (15%): withdrawal history, reserve ratios
-- On-Chain Health (10%): reserve transparency, on-chain activity
-- Reputation & Market (10%): media sentiment, leadership, track record
+Return JSON: {{"narrative":"2 paragraphs interpreting counterparty risk scores","scorecard_by_custodian":[{{"name":"...","overall_score":0,"tier":"...","strongest_dimension":"...","weakest_dimension":"...","key_risk":"..."}}],"weighted_portfolio_score":{weighted_score},"trend":"improving|stable|deteriorating","trend_rationale":"..."}}""")
 
-Return JSON: {{"narrative":"2 paragraphs interpreting the counterparty risk scores","scorecard_by_custodian":[{{"name":"...","overall_score":0,"tier":"...","strongest_dimension":"...","weakest_dimension":"...","key_risk":"one sentence"}}],"weighted_portfolio_score":{weighted_score:.0f},"trend":"improving|stable|deteriorating","trend_rationale":"..."}}""")
-
-        # ── Section 04: Counterparty Analysis ─────────────────────────────────
-        s4 = _call(f"""Write the Counterparty Analysis section for a Raven counterparty risk report.
-Analyse ONLY the custodians in this portfolio. Do NOT reference other entities.
+        # ── Section 04: Counterparty Analysis ─────────────────────────────
+        s4 = _call(f"""Counterparty Analysis — Raven Report.
+Analyse ONLY the custodians listed below. Do NOT reference other entities.
 
 Client: {cl.get('display_name')} | AUM: CHF {nav:,.0f}
-Portfolio custodians:
-{json.dumps(portfolio_custodians, indent=2)}
-FINMA custody status: {s7.get('overall_status','UNKNOWN')}
-Custodians requiring FINMA disclosure: {s7.get('disclosure_custodians',[])}
-Compliant custodians: {s7.get('compliant_custodians',[])}
-Concentration warnings: {json.dumps(conc_warnings)}
-Open alerts: {[a.get('title') for a in open_alerts]}
+Custodians: {_j(portfolio_custodians)}
+FINMA status: {finma_status}
+Disclosure required for: {disclosure_cps}
+Compliant: {compliant_cps}
+Concentration warnings: {warn_names}
+Open alerts: {alert_titles}
 
-Return JSON: {{"narrative":"2-3 paragraphs on counterparty risk profile of this portfolio","custodian_concentration_risk":"concentration analysis","highlighted_concerns":["specific risks per custodian"],"watchlist":["custodians to monitor and why"],"overall_counterparty_assessment":"LOW|MEDIUM|HIGH|CRITICAL"}}""")
+Return JSON: {{"narrative":"2-3 paragraphs","custodian_concentration_risk":"...","highlighted_concerns":["..."],"watchlist":["..."],"overall_counterparty_assessment":"LOW|MEDIUM|HIGH|CRITICAL"}}""")
 
-        # ── Section 05: Stress Tests ───────────────────────────────────────────
-        s5 = _call(f"""Write the Stress Test Results section for a Raven counterparty risk report.
-Focus on counterparty-specific scenarios (custodian failure, regulatory action, liquidity freeze).
+        # ── Section 05: Stress Tests ───────────────────────────────────────
+        s5 = _call(f"""Stress Test Results — Raven Counterparty Risk Report.
+Focus on custody and counterparty failure scenarios.
 
-Portfolio NAV: CHF {nav:,.0f}
-Custodians: {[c['name'] for c in portfolio_custodians]}
-Executed scenarios: {json.dumps(stress_summary) if stress_summary else "None run yet"}
+Portfolio NAV: CHF {nav:,.0f} | Custodians: {custodian_names}
+Executed scenarios: {_j(stress_summary) if stress_summary else "None run yet"}
 
-If no scenarios run: explain why counterparty stress testing matters specifically for this portfolio
-(e.g. what happens if Bitcoin Suisse becomes insolvent — Art. 242a protection, recovery process).
-Recommend specific scenarios relevant to this portfolio's custody structure.
+Return JSON: {{"narrative":"...","worst_scenario":"...","resilience_assessment":"...","tail_risk_commentary":"..."}}""")
 
-Return JSON: {{"narrative":"stress test analysis focused on counterparty and custody risk","worst_scenario":"name and impact","resilience_assessment":"...","tail_risk_commentary":"custody-specific tail risk"}}""")
-
-        # ── Section 06: Recommendations ───────────────────────────────────────
-        s6 = _call(f"""Write the Recommendations section for a Raven counterparty risk report.
-ALL recommendations must be about counterparty risk — not market risk, VaR, or portfolio performance.
+        # ── Section 06: Recommendations ───────────────────────────────────
+        s6 = _call(f"""Recommendations — Raven Counterparty Risk Report.
+ALL recommendations about counterparty risk only. No market risk or VaR.
 
 Client: {cl.get('display_name')} ({client_type.replace('_',' ')}) | AUM: CHF {nav:,.0f}
-Weighted CP risk score: {weighted_score:.0f}/100 | FINMA status: {s7.get('overall_status','UNKNOWN')}
-Custodians: {json.dumps([{{'name':c['name'],'tier':c['risk_tier'],'weight_pct':c['weight_pct'],'finma':s7.get('overall_status')}} for c in portfolio_custodians])}
-FINMA disclosure required for: {s7.get('disclosure_custodians',[])}
-Concentration warnings: {[w.get('name') for w in conc_warnings]}
-Limit breaches: {len(limit_breaches)}
-Open alerts: {alerts_count}
-Consent required: {s7.get('consent_required', False)}
+Weighted score: {weighted_score}/100 | FINMA: {finma_status}
+Custodians: {_j([{{"name":c["name"],"tier":c["risk_tier"],"weight_pct":c["weight_pct"]}} for c in portfolio_custodians])}
+Disclosure required: {disclosure_cps} | Consent required: {consent_required}
+Concentration warnings: {warn_names} | Limit breaches: {len(limit_breaches)}
 
-Focus recommendations on: custodian migration, FINMA disclosure compliance, concentration reduction,
-consent documentation, counterparty monitoring. NOT on asset allocation or market risk.
+Return JSON: {{"immediate":[{{"priority":"HIGH","action":"...","rationale":"...","timeline":"..."}}],"short_term":[{{"priority":"MEDIUM","action":"...","rationale":"...","timeline":"..."}}],"monitoring":[{{"item":"...","threshold":"..."}}],"disclaimer":"FINMA/FinSA disclaimer"}}""")
 
-Return JSON: {{
-  "immediate":[{{"priority":"HIGH","action":"counterparty action","rationale":"why urgent","timeline":"within X days"}}],
-  "short_term":[{{"priority":"MEDIUM","action":"...","rationale":"...","timeline":"within X weeks"}}],
-  "monitoring":[{{"item":"counterparty metric to monitor","threshold":"alert condition"}}],
-  "disclaimer":"Swiss regulatory disclaimer referencing FINMA and FinSA"
-}}""")
-
+        # ── Save to DB ─────────────────────────────────────────────────────
         supabase.table("reports").update({
             "section_executive_summary":     s1,
             "section_portfolio_composition": s2,
@@ -214,22 +237,27 @@ Return JSON: {{
             "section_counterparty_analysis": s4,
             "section_stress_test_results":   s5,
             "section_recommendations":       s6,
-            "section_regulatory_disclosure": s7,
-            "status": "IN_REVIEW",
-            "generation_completed_at": datetime.utcnow().isoformat(),
-            "model_version": settings.ANTHROPIC_MODEL,
+            "section_regulatory_disclosure": s7_json,
+            "status":                        "IN_REVIEW",
+            "generation_completed_at":       datetime.utcnow().isoformat(),
+            "model_version":                 settings.ANTHROPIC_MODEL,
         }).eq("report_id", report_id).execute()
 
         supabase.table("audit_log").insert({
-            "tenant_id": settings.DEFAULT_TENANT_ID,
+            "tenant_id":      settings.DEFAULT_TENANT_ID,
             "event_category": "AGENT",
-            "event_type": "report.generation_completed",
-            "actor_type": "AGENT",
-            "resource_type": "reports",
-            "resource_id": report_id,
-            "metadata": {"model": settings.ANTHROPIC_MODEL, "sections": 6},
+            "event_type":     "report.generation_completed",
+            "actor_type":     "AGENT",
+            "resource_type":  "reports",
+            "resource_id":    report_id,
+            "metadata":       {"model": settings.ANTHROPIC_MODEL, "sections": 7},
         }).execute()
 
     except Exception as e:
-        supabase.table("reports").update({"generation_error": str(e)}).eq("report_id", report_id).execute()
+        full_tb = traceback.format_exc()
+        print(f"[report_pipeline] ERROR: {full_tb}")
+        supabase.table("reports").update({
+            "generation_error": f"{str(e)}\n\nTraceback:\n{full_tb}",
+            "status": "DRAFT",
+        }).eq("report_id", report_id).execute()
         raise
