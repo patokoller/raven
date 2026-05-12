@@ -90,10 +90,15 @@ export default function AlertsPage() {
                       a.severity === 'WARNING' ? 'text-amber' : 'text-ink-mid'
                     }`} />
                     <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1">
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
                         <span className={`text-xs font-mono px-1.5 py-0.5 rounded ${SEV[a.severity] ?? SEV.INFO}`}>
                           {a.severity}
                         </span>
+                        {(() => { const d = getDimension(a); return d ? (
+                          <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border border-current/20 ${d.color}`}>
+                            {d.label}
+                          </span>
+                        ) : null })()}
                         <span className="font-medium text-sm">{a.title}</span>
                       </div>
                       <div className="text-xs text-ink-mid mb-2">{a.body}</div>
