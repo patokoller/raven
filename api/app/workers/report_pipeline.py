@@ -36,7 +36,7 @@ def generate_report(report_id: str, portfolio_id: str, client_id: str):
         cl          = supabase.table("clients").select("*").eq("client_id", client_id).single().execute().data
         stress      = supabase.table("stress_test_results").select("*, stress_scenarios(display_name)").eq("portfolio_id", portfolio_id).order("run_at", desc=True).limit(8).execute().data
         cps         = supabase.table("counterparties").select("counterparty_id,slug,display_name,entity_type,jurisdiction,regulator,current_risk_tier,latest_score_id,finma_custody_status,enrichment_data").eq("tenant_id", settings.DEFAULT_TENANT_ID).execute().data
-        open_alerts = supabase.table("alerts").select("title,severity,alert_type").eq("portfolio_id", portfolio_id).in_("status", ["OPEN","ACKNOWLEDGED"]).execute().data
+        open_alerts = supabase.table("alerts").select("title,severity,alert_type").eq("tenant_id", settings.DEFAULT_TENANT_ID).in_("status", ["OPEN","ACKNOWLEDGED"]).execute().data
 
         client_type = cl.get("client_type") or "qualified_investor"
         nav         = portfolio.get("total_nav_chf", 0) or 0
