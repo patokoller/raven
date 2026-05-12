@@ -430,10 +430,10 @@ function ResearchPanel({ counterpartyId, entityName, onApplied }: any) {
 
 // ── Enrichment form section ───────────────────────────────────
 
-function EnrichSection({ title, num, color, completeness, children }: any) {
+function EnrichSection({ id, title, num, color, completeness, children }: any) {
   const [open, setOpen] = useState(false)
   return (
-    <div className="card overflow-hidden">
+    <div id={id} className="card overflow-hidden">
       <button onClick={() => setOpen(o => !o)}
         className="w-full flex items-center justify-between px-5 py-3.5 border-b border-border hover:bg-surface-2/30 transition-colors">
         <div className="flex items-center gap-3">
@@ -630,13 +630,26 @@ export default function CounterpartyDetailPage() {
                           <div className="text-xs text-ink-mid mb-3">{flag.reason}</div>
                           <div className="flex items-center gap-2">
                             <button
-                              onClick={function(e) {
+                              onClick={async function(e) {
                                 e.stopPropagation()
+                                // Direct API call — avoids stale closure on save()
+                                const flagKey = flag.doc_ref || flag.reason
                                 const updated = (enrich._regulatory_flags || []).filter(function(f: any) {
-                                  return (f.doc_ref || f.reason) !== (flag.doc_ref || flag.reason)
+                                  return (f.doc_ref || f.reason) !== flagKey
                                 })
-                                update('_regulatory_flags', updated)
-                                setTimeout(function() { save() }, 100)
+                                const newEnrich = Object.assign({}, enrich, { _regulatory_flags: updated })
+                                try {
+                                  const r = await fetch(API + '/api/v1/counterparties/' + id + '/enrichment', {
+                                    method: 'POST', headers: H(),
+                                    body: JSON.stringify(newEnrich),
+                                  })
+                                  if (r.ok) {
+                                    setEnrich(newEnrich)
+                                    toast.success('Flag dismissed')
+                                  } else {
+                                    toast.error('Could not dismiss flag')
+                                  }
+                                } catch { toast.error('Connection error') }
                               }}
                               className="text-[10px] px-2.5 py-1 rounded border border-border text-ink-mid hover:bg-surface-2 transition-colors">
                               Dismiss — no score impact
@@ -644,8 +657,17 @@ export default function CounterpartyDetailPage() {
                             <button
                               onClick={function(e) {
                                 e.stopPropagation()
-                                const el = document.getElementById('enrichment-regulatory')
-                                if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                                // Switch to manual tab first, then scroll
+                                setTab('manual')
+                                setTimeout(function() {
+                                  const el = document.getElementById('enrichment-regulatory')
+                                  if (el) {
+                                    el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                                    // Click to open the section
+                                    const btn = el.querySelector('button')
+                                    if (btn) btn.click()
+                                  }
+                                }, 150)
                               }}
                               className="text-[10px] px-2.5 py-1 rounded border border-amber/40 text-amber hover:bg-amber/5 transition-colors">
                               Adjust enrichment fields
@@ -777,7 +799,7 @@ export default function CounterpartyDetailPage() {
                 Fill in data signals manually. Each field directly affects the score. Click <strong>Save & Rescore</strong> when done.
               </div>
 
-              <EnrichSection title="Regulatory Standing" num="01" color="#C9A84C" completeness={getC(['license_active','enforcement_actions_12m'])}>
+              <EnrichSection id="enrichment-regulatory" title="Regulatory Standing" num="01" color="#C9A84C" completeness={getC(['license_active','enforcement_actions_12m'])}>
                 <Toggle label="License Active" hint="Primary operating licence currently active and in good standing"
                   field="license_active" value={enrich.license_active} onChange={update} />
                 <NumberInput label="Enforcement Actions (12m)" hint="Regulatory enforcement actions, fines, or sanctions in the last 12 months"
