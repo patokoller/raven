@@ -174,12 +174,14 @@ Open alerts: {alerts_count} | Concentration warnings: {warn_names} | Limit breac
 Return JSON: {{"headline":"one sentence","key_findings":["..."],"overall_assessment":"2-3 paragraphs on counterparty risk only","immediate_actions":["..."],"risk_indicator":"GREEN|AMBER|RED"}}""")
 
         # ── Section 02: Portfolio & Custody Composition ────────────────────
+        custodian_summary = _j([{"name":c["name"],"value_chf":c["value_chf"],"weight_pct":c["weight_pct"],"tier":c["risk_tier"]} for c in portfolio_custodians])
+        pos_json = _j(pos_by_custodian)
         s2 = _call(f"""Portfolio Composition — Raven Counterparty Risk Report.
 Focus on which custodian holds what. Not asset performance.
 
 Client: {cl.get('display_name')} | AUM: CHF {nav:,.0f}
-Positions by custodian: {_j(pos_by_custodian)}
-Custodian summary: {_j(portfolio_custodians)}
+Positions by custodian: {pos_json}
+Custodian summary: {custodian_summary}
 
 Return JSON: {{"narrative":"2 paragraphs on custody structure","concentration_assessment":"...","key_exposures":["..."],"diversification_score":"LOW|MEDIUM|HIGH"}}""")
 
@@ -223,7 +225,7 @@ ALL recommendations about counterparty risk only. No market risk or VaR.
 
 Client: {cl.get('display_name')} ({client_type.replace('_',' ')}) | AUM: CHF {nav:,.0f}
 Weighted score: {weighted_score}/100 | FINMA: {finma_status}
-Custodians: {_j([{{"name":c["name"],"tier":c["risk_tier"],"weight_pct":c["weight_pct"]}} for c in portfolio_custodians])}
+Custodians: {custodians_brief}
 Disclosure required: {disclosure_cps} | Consent required: {consent_required}
 Concentration warnings: {warn_names} | Limit breaches: {len(limit_breaches)}
 
