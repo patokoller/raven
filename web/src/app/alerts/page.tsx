@@ -17,6 +17,52 @@ const SEV: Record<string, string> = {
   INFO:     'bg-surface-2 text-ink-mid border border-border',
 }
 
+
+const DIMENSION_MAP: Record<string, { label: string, color: string }> = {
+  regulatory_action:      { label: 'Regulatory Standing',    color: 'bg-violet-500/10 text-violet-600' },
+  license_suspended:      { label: 'Regulatory Standing',    color: 'bg-violet-500/10 text-violet-600' },
+  sanctions_match:        { label: 'Regulatory Standing',    color: 'bg-violet-500/10 text-violet-600' },
+  regulatory_update:      { label: 'Regulatory Standing',    color: 'bg-violet-500/10 text-violet-600' },
+  enforcement_action:     { label: 'Regulatory Standing',    color: 'bg-violet-500/10 text-violet-600' },
+  financial_stress:       { label: 'Financial Strength',     color: 'bg-blue-500/10 text-blue-600' },
+  audit_missing:          { label: 'Financial Strength',     color: 'bg-blue-500/10 text-blue-600' },
+  insolvency_risk:        { label: 'Financial Strength',     color: 'bg-blue-500/10 text-blue-600' },
+  operational_incident:   { label: 'Operational Resilience', color: 'bg-orange-500/10 text-orange-600' },
+  security_breach:        { label: 'Operational Resilience', color: 'bg-orange-500/10 text-orange-600' },
+  downtime:               { label: 'Operational Resilience', color: 'bg-orange-500/10 text-orange-600' },
+  liquidity_drop:         { label: 'Liquidity & Reserves',   color: 'bg-cyan-500/10 text-cyan-700' },
+  withdrawal_freeze:      { label: 'Liquidity & Reserves',   color: 'bg-cyan-500/10 text-cyan-700' },
+  reserve_decline:        { label: 'Liquidity & Reserves',   color: 'bg-cyan-500/10 text-cyan-700' },
+  tvl_drop:               { label: 'Liquidity & Reserves',   color: 'bg-cyan-500/10 text-cyan-700' },
+  onchain_outflow:        { label: 'On-Chain Health',        color: 'bg-teal/10 text-teal' },
+  smart_contract_exploit: { label: 'On-Chain Health',        color: 'bg-teal/10 text-teal' },
+  wallet_flagged:         { label: 'On-Chain Health',        color: 'bg-teal/10 text-teal' },
+  reputation_event:       { label: 'Reputation & Market',    color: 'bg-pink-500/10 text-pink-600' },
+  media_negative:         { label: 'Reputation & Market',    color: 'bg-pink-500/10 text-pink-600' },
+  critical_tier:          { label: 'Overall Risk Score',     color: 'bg-red/10 text-red' },
+  score_drop:             { label: 'Overall Risk Score',     color: 'bg-red/10 text-red' },
+}
+
+const DIM_BY_KEY: Record<string, { label: string, color: string }> = {
+  regulatory: { label: 'Regulatory Standing',    color: 'bg-violet-500/10 text-violet-600' },
+  financial:  { label: 'Financial Strength',     color: 'bg-blue-500/10 text-blue-600' },
+  operational:{ label: 'Operational Resilience', color: 'bg-orange-500/10 text-orange-600' },
+  liquidity:  { label: 'Liquidity & Reserves',   color: 'bg-cyan-500/10 text-cyan-700' },
+  onchain:    { label: 'On-Chain Health',        color: 'bg-teal/10 text-teal' },
+  reputation: { label: 'Reputation & Market',    color: 'bg-pink-500/10 text-pink-600' },
+}
+
+function getDimension(alert: any): { label: string, color: string } | null {
+  const meta = alert.metadata || {}
+  if (meta.dimension) {
+    const d = String(meta.dimension).toLowerCase()
+    for (const [key, val] of Object.entries(DIM_BY_KEY)) {
+      if (d.includes(key)) return val
+    }
+  }
+  return DIMENSION_MAP[alert.alert_type] || null
+}
+
 export default function AlertsPage() {
   const [alerts, setAlerts] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
