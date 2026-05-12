@@ -405,6 +405,7 @@ export function ReportPDF({ report, clientName }: ReportPDFProps) {
   const s4 = report.section_counterparty_analysis
   const s5 = report.section_stress_test_results
   const s6 = report.section_recommendations
+  const s7 = report.section_regulatory_disclosure
   const reportDate = new Date().toLocaleDateString('en-CH', { day: '2-digit', month: 'long', year: 'numeric' })
 
   return (
