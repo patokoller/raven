@@ -593,10 +593,27 @@ export default function CounterpartyDetailPage() {
             <div className="card overflow-hidden border-amber/40">
               <div className="px-4 py-3 bg-amber/10 border-b border-amber/20 flex items-center gap-2">
                 <span className="text-xs font-mono text-amber font-semibold uppercase tracking-wider">Active Regulatory Flags</span>
-                <span className="text-[10px] bg-amber text-white rounded-full px-1.5 py-0.5 font-mono">{enrich._regulatory_flags.length}</span>
+                {(() => {
+                  const seen = new Set()
+                  const uniq = enrich._regulatory_flags.filter(function(f: any) {
+                    const k = f.doc_ref || f.reason
+                    if (seen.has(k)) return false
+                    seen.add(k)
+                    return true
+                  })
+                  return <span className="text-[10px] bg-amber text-white rounded-full px-1.5 py-0.5 font-mono">{uniq.length}</span>
+                })()}
               </div>
               <div className="divide-y divide-border">
-                {enrich._regulatory_flags.map(function(flag: any, i: number) {
+                {(function() {
+                  const seen = new Set()
+                  return enrich._regulatory_flags.filter(function(f: any) {
+                    const k = f.doc_ref || f.reason
+                    if (seen.has(k)) return false
+                    seen.add(k)
+                    return true
+                  })
+                })().map(function(flag: any, i: number) {
                   return (
                     <div key={i} className="px-4 py-3">
                       <div className="flex items-start justify-between gap-3">

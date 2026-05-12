@@ -439,10 +439,16 @@ def apply_to_affected_counterparties(doc_id: str) -> dict:
             "applied_at": datetime.utcnow().isoformat(),
         }
 
-        # Safe list append — handle case where _regulatory_flags isn't a list
+        # Deduplicated append — prevent same doc_ref appearing multiple times
         existing_flags = existing.get("_regulatory_flags", [])
         if not isinstance(existing_flags, list):
             existing_flags = []
+
+        # Remove any existing entry for this same document before appending
+        existing_flags = [
+            f for f in existing_flags
+            if f.get("doc_ref") != reg_note["doc_ref"]
+        ]
 
         updates = {"_regulatory_flags": existing_flags + [reg_note]}
 
