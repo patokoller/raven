@@ -313,7 +313,16 @@ def build_portfolio_disclosure(
         cp_id   = exposure.get("counterparty_id")
         cp_name = exposure.get("name", "Unknown")
         aum     = exposure.get("value_chf")
-        cp      = cp_by_id.get(cp_id, {})
+
+        # Merge DB record with exposure data (exposure may have enriched fields)
+        cp = cp_by_id.get(cp_id, {})
+
+        # Use exposure fields as fallback when DB record is missing
+        eff_slug     = cp.get("slug") or exposure.get("slug") or cp_name.lower().replace(" ", "-")
+        eff_type     = cp.get("entity_type") or exposure.get("entity_type", "")
+        eff_juris    = cp.get("jurisdiction") or exposure.get("jurisdiction", "")
+        eff_reg      = cp.get("regulator") or exposure.get("regulator", "")
+        eff_enrich   = cp.get("enrichment_data") or exposure.get("enrichment") or {}
 
         # Get or compute custody status
         existing_status = cp.get("finma_custody_status")
@@ -326,13 +335,12 @@ def build_portfolio_disclosure(
                 "alternatives_required": existing_status != "compliant",
             }
         else:
-            enrich = cp.get("enrichment_data") or {}
             status_info = classify_custody_status(
-                slug=cp.get("slug", cp_name.lower().replace(" ", "-")),
-                entity_type=cp.get("entity_type", ""),
-                jurisdiction=cp.get("jurisdiction", ""),
-                regulator=cp.get("regulator", ""),
-                enrichment_data=enrich,
+                slug=eff_slug,
+                entity_type=eff_type,
+                jurisdiction=eff_juris,
+                regulator=eff_reg,
+                enrichment_data=eff_enrich,
             )
 
         disclosure = generate_disclosure(

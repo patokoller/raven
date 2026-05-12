@@ -131,6 +131,8 @@ def compute_portfolio_risk(portfolio_id: str) -> dict:
                 score_data = score_data[0] if score_data else {}
 
             cp_exposure[cp_id] = {
+                "counterparty_id": cp_id,
+                "slug":        cp.get("slug", ""),
                 "name":        cp.get("display_name", "Unknown"),
                 "entity_type": cp.get("entity_type", ""),
                 "jurisdiction": cp.get("jurisdiction", "Unknown"),
