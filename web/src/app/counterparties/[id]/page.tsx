@@ -588,6 +588,38 @@ export default function CounterpartyDetailPage() {
             </div>
           </div>
 
+          {/* Regulatory Flags from linked regulations */}
+          {Array.isArray(enrich._regulatory_flags) && enrich._regulatory_flags.length > 0 && (
+            <div className="card overflow-hidden border-amber/40">
+              <div className="px-4 py-3 bg-amber/10 border-b border-amber/20 flex items-center gap-2">
+                <span className="text-xs font-mono text-amber font-semibold uppercase tracking-wider">Active Regulatory Flags</span>
+                <span className="text-[10px] bg-amber text-white rounded-full px-1.5 py-0.5 font-mono">{enrich._regulatory_flags.length}</span>
+              </div>
+              <div className="divide-y divide-border">
+                {enrich._regulatory_flags.map(function(flag: any, i: number) {
+                  return (
+                    <div key={i} className="px-4 py-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className={'text-[10px] font-mono px-1.5 py-0.5 rounded ' + (flag.impact === 'CRITICAL' ? 'bg-red text-white' : flag.impact === 'HIGH' ? 'bg-red/10 text-red' : 'bg-amber/10 text-amber')}>
+                              {flag.impact}
+                            </span>
+                            <span className="text-xs font-medium text-ink">{flag.doc_ref}</span>
+                          </div>
+                          <div className="text-xs text-ink-mid">{flag.reason}</div>
+                        </div>
+                        <div className="text-[10px] text-ink-mid font-mono whitespace-nowrap">
+                          {flag.applied_at ? new Date(flag.applied_at).toLocaleDateString('en-CH') : ''}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
           <div className="card p-5">
             <div className="label mb-3">Data Completeness</div>
             {[

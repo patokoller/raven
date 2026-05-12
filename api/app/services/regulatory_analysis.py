@@ -268,6 +268,13 @@ def analyse_document(doc_id: str) -> dict:
         }).execute()
 
         print(f"[reg_analysis] ✓ {analysis.get('doc_ref', doc_id)}: {criticality}")
+        # Auto-apply to affected counterparties
+        try:
+            apply_result = apply_to_affected_counterparties(doc_id)
+            print(f"[reg_analysis] Auto-applied to {len(apply_result.get('updated', []))} counterparties")
+        except Exception as e:
+            print(f"[reg_analysis] Auto-apply error (non-fatal): {e}")
+
         return {"status": "analysed", "doc_id": doc_id, "criticality": criticality}
 
     except Exception as e:
