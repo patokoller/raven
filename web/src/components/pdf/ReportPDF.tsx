@@ -783,7 +783,7 @@ export function ReportPDF({ report, clientName }: ReportPDFProps) {
                   </Text>
                   {d.client_actions.map((a: string, j: number) => (
                     <View key={j} style={styles.finding}>
-                      <Text style={[styles.findingBullet, { color: '#C9A84C' }]}>{'→'}</Text>
+                      <Text style={[styles.findingBullet, { color: '#C9A84C' }]}>{'>'}</Text>
                       <Text style={styles.findingText}>{a}</Text>
                     </View>
                   ))}
